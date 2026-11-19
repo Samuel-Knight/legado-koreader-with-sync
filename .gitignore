@@ -18,3 +18,8 @@ package-lock.json
 .kotlin/
 .cxx
 .vscode
+
+# Local downloads, test uploads, and release artifacts
+/.codex-remote/
+/baseline/
+/dist/

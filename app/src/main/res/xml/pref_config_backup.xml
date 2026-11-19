@@ -3,6 +3,45 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <io.legado.app.lib.prefs.PreferenceCategory
+        android:title="@string/koreader_sync"
+        app:allowDividerAbove="false"
+        app:allowDividerBelow="false"
+        app:iconSpaceReserved="false"
+        app:layout="@layout/view_preference_category">
+
+        <io.legado.app.lib.prefs.EditTextPreference
+            android:key="koReaderServer"
+            android:summary="@string/koreader_server_s"
+            android:title="@string/koreader_server"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.EditTextPreference
+            android:key="koReaderUsername"
+            android:summary="@string/koreader_username_s"
+            android:title="@string/koreader_username"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.EditTextPreference
+            android:key="koReaderPassword"
+            android:summary="@string/koreader_password_s"
+            android:title="@string/koreader_password"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.EditTextPreference
+            android:key="koReaderDeviceName"
+            android:summary="@string/koreader_device_s"
+            android:title="@string/koreader_device"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.Preference
+            android:key="koReaderTestAuth"
+            android:summary="@string/koreader_test_auth_s"
+            android:title="@string/koreader_test_auth"
+            app:iconSpaceReserved="false" />
+
+    </io.legado.app.lib.prefs.PreferenceCategory>
+
+    <io.legado.app.lib.prefs.PreferenceCategory
         android:title="@string/web_dav_set"
         app:allowDividerAbove="false"
         app:allowDividerBelow="false"

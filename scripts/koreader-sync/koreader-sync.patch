@@ -1,0 +1,3122 @@
+diff --git a/KOREADER_SYNC_README.md b/KOREADER_SYNC_README.md
+new file mode 100644
+index 000000000..bcb8c1b8e
+--- /dev/null
++++ b/KOREADER_SYNC_README.md
+@@ -0,0 +1,34 @@
++# Legado koreader-sync
++
++基线：Legado `3.26101819`，同步协议参考 KOReader `v2026.07.2`。
++
++共存包名：`com.legado.app.releaseA`，可以与 Legado 官方普通版 `com.legado.app.release` 同时安装。
++
++## 功能
++
++- 在小说阅读页右上角“...”中选择“KOReader 同步”，可直接完成进度同步配置和操作。
++- 支持“自动同步文档”、按 0–999 页触发同步、较新/较旧进度分别选择静默、提示或不同步。
++- 支持“立即上传本设备的进度”和“立即从其他设备拉取进度”，两项操作不依赖自动同步开关。
++- 支持 KOReader 的二进制文档匹配（抽取式 MD5）和文件名匹配。
++- 自动同步采用 KOReader 的 25 秒接口防抖、空闲 10 秒后按页上传、离线失败队列和联网后先重试上传再拉取逻辑。
++- “发送文档元数据”默认关闭，与 KOReader 一致；自建服务器需要 `filename`、`title`、`authors` 时可手动开启。
++- 支持 EPUB、PDF 和 Legado 可读取的其他本地书籍；在线书源因没有可匹配的原始文件，不参与 KOReader 同步。
++- 默认连接 `https://kosync.nickthesick.com`，也支持 KOReader 的兼容自建服务器。
++
++## 使用
++
++1. 在 KOReader 中登录 KOSync，并让两端打开完全相同的本地书籍文件。
++2. 在阅读页“...”中打开“KOReader 同步”，进入“账号与服务器”，填写同一服务器、账号、密码和设备名称。
++3. 按需打开“自动同步文档”。页数设为 0 时关闭按页触发；设为 N 时，每经过 N 页并在空闲 10 秒后上传。
++4. “同步到较新状态”和“同步到较旧状态”可分别设为静默、提示或不同步；默认“较新”为提示、“较旧”为不同步。
++5. 推荐保持“文件二进制”匹配；只有两端文件名一致且主动选择文件名模式时才使用文件名匹配。
++
++服务器地址可以填写完整 URL，也可以省略协议，省略时会自动补全为 `https://`。上传失败会保留最近的同步项，联网后先重试队列，再拉取云端进度。
++
++## 位置兼容
++
++Legado 与 KOReader 使用不同的排版和定位模型。同步时以全书百分比作为共同位置；PDF 使用页码，EPUB 使用 CreNGINE XPointer 与章节位置双向映射。无法解析 XPointer 时再按服务端百分比恢复到 Legado 的对应章节和章内位置。
++
++## 安装说明
++
++生成的 Release APK 使用本地调试证书签名。共存版使用独立包名 `com.legado.app.releaseA`，不会覆盖官方普通版；如需替换同包名的官方 `releaseA`，则须先卸载该包。
+diff --git a/app/build.gradle b/app/build.gradle
+index c7e643eba..85c82ebbb 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -21,8 +21,8 @@ static def releaseTime() {
+ }
+ 
+ def name = "legado"
+-def version = "3." + releaseTime()
+-def versionCodeValue = 30000
++def version = "3.26101819-koreader-sync"
++def versionCodeValue = 38485
+ // Preserve the published code at this point, then ignore GitHub wrapper merge commits.
+ def versionCodeBaseCommit = '9639f027fbc8cfdf57ce136a9e0c98829a235aef'
+ def versionCodeAtBase = 37540
+@@ -112,7 +112,7 @@ android {
+             if (project.hasProperty("RELEASE_STORE_FILE")) {
+                 signingConfig = signingConfigs.myConfig
+             }
+-            applicationIdSuffix '.release'
++            applicationIdSuffix '.releaseA'
+             if (getApplicationIdSuffix() == '.releaseA') {
+                 manifestPlaceholders.put("app_name", "@string/app_name_a")
+             } else {
+diff --git a/app/google-services.json b/app/google-services.json
+index 526489d16..1c2ac7fd4 100644
+--- a/app/google-services.json
++++ b/app/google-services.json
+@@ -47,7 +47,7 @@
+       "client_info": {
+         "mobilesdk_app_id": "1:620835636521:android:0839a6ecc9c33bd2cda338",
+         "android_client_info": {
+-          "package_name": "com.legado.app.release"
++          "package_name": "com.legado.app.releaseA"
+         }
+       },
+       "oauth_client": [
+@@ -55,7 +55,7 @@
+           "client_id": "620835636521-ndsrgnnhfquo2uk7mdm0d3kqoflq5ulp.apps.googleusercontent.com",
+           "client_type": 1,
+           "android_info": {
+-            "package_name": "com.legado.app.release",
++            "package_name": "com.legado.app.releaseA",
+             "certificate_hash": "acc4d404a12261f8fbc70954f715fcd4a211e3e9"
+           }
+         },
+@@ -156,4 +156,4 @@
+     }
+   ],
+   "configuration_version": "1"
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/io/legado/app/constant/PreferKey.kt b/app/src/main/java/io/legado/app/constant/PreferKey.kt
+index bf4eaa0ba..760d40eda 100644
+--- a/app/src/main/java/io/legado/app/constant/PreferKey.kt
++++ b/app/src/main/java/io/legado/app/constant/PreferKey.kt
+@@ -150,6 +150,18 @@ object PreferKey {
+     const val screenOrientation = "screenOrientation"
+     const val syncBookProgress = "syncBookProgress"
+     const val syncBookProgressPlus = "syncBookProgressPlus"
++    const val koReaderSyncEnabled = "koReaderSyncEnabled"
++    const val koReaderPagesBeforeSync = "koReaderPagesBeforeSync"
++    const val koReaderSyncForward = "koReaderSyncForward"
++    const val koReaderSyncBackward = "koReaderSyncBackward"
++    const val koReaderServer = "koReaderServer"
++    const val koReaderUsername = "koReaderUsername"
++    const val koReaderPassword = "koReaderPassword"
++    const val koReaderMatchingMode = "koReaderMatchingMode"
++    const val koReaderSendMetadata = "koReaderSendMetadata"
++    const val koReaderDeviceName = "koReaderDeviceName"
++    const val koReaderTestAuth = "koReaderTestAuth"
++    const val koReaderUploadQueue = "koReaderUploadQueue"
+     const val cronet = "Cronet"
+     const val antiAlias = "antiAlias"
+     const val bitmapCacheSize = "bitmapCacheSize"
+diff --git a/app/src/main/java/io/legado/app/data/dao/BookGroupDao.kt b/app/src/main/java/io/legado/app/data/dao/BookGroupDao.kt
+index 4f7dcaecc..d45e3b3d5 100644
+--- a/app/src/main/java/io/legado/app/data/dao/BookGroupDao.kt
++++ b/app/src/main/java/io/legado/app/data/dao/BookGroupDao.kt
+@@ -25,11 +25,10 @@ interface BookGroupDao {
+ 
+     @get:Query(
+         """
+-        with const as (SELECT sum(groupId) sumGroupId FROM book_groups where groupId > 0)
+-        SELECT book_groups.* FROM book_groups join const 
+-        where show > 0 
++        SELECT * FROM book_groups
++        WHERE show > 0
+         and (
+-            (groupId >= 0  and exists (select 1 from books where `group` & book_groups.groupId > 0))
++            groupId > 0
+             or groupId = -1
+             or (groupId = -2 and exists (select 1 from books where type & ${BookType.local} > 0))
+             or (groupId = -3 and exists (select 1 from books where type & ${BookType.audio} > 0))
+@@ -41,7 +40,7 @@ interface BookGroupDao {
+                     where type & ${BookType.audio} = 0
+                     and type & ${BookType.video} = 0
+                     and type & ${BookType.local} = 0
+-                    and const.sumGroupId & `group` = 0
++                    and ((SELECT sum(groupId) FROM book_groups where groupId > 0) & `group`) = 0
+                 )
+             )
+             or (groupId = -5
+@@ -50,7 +49,7 @@ interface BookGroupDao {
+                     where type & ${BookType.audio} = 0
+                     and type & ${BookType.video} = 0
+                     and type & ${BookType.local} > 0
+-                    and const.sumGroupId & `group` = 0
++                    and ((SELECT sum(groupId) FROM book_groups where groupId > 0) & `group`) = 0
+                 )
+             )
+         )
+diff --git a/app/src/main/java/io/legado/app/help/ReaderMenuConfig.kt b/app/src/main/java/io/legado/app/help/ReaderMenuConfig.kt
+index ed70b953a..7af48d0da 100644
+--- a/app/src/main/java/io/legado/app/help/ReaderMenuConfig.kt
++++ b/app/src/main/java/io/legado/app/help/ReaderMenuConfig.kt
+@@ -40,6 +40,7 @@ data class ReaderMenuConfig(
+             "editContent",
+             "pageAnim",
+             "getProgress",
++            "koReaderSync",
+             "coverProgress",
+             "reverseContent",
+             "simulatedReading",
+diff --git a/app/src/main/java/io/legado/app/help/config/AppConfig.kt b/app/src/main/java/io/legado/app/help/config/AppConfig.kt
+index e256285bd..4ee50c61f 100644
+--- a/app/src/main/java/io/legado/app/help/config/AppConfig.kt
++++ b/app/src/main/java/io/legado/app/help/config/AppConfig.kt
+@@ -8,6 +8,7 @@ import io.legado.app.constant.AppConst
+ import io.legado.app.constant.PreferKey
+ import io.legado.app.data.appDb
+ import io.legado.app.help.book.ResourceThemeGeneration
++import io.legado.app.help.koReader.KoReaderDefaults
+ import io.legado.app.utils.GSON
+ import io.legado.app.utils.canvasrecorder.CanvasRecorderFactory
+ import io.legado.app.utils.defaultSharedPreferences
+@@ -724,6 +725,31 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
+ 
+     val syncBookProgressPlus get() = appCtx.getPrefBoolean(PreferKey.syncBookProgressPlus, false)
+ 
++    val koReaderSyncEnabled get() = appCtx.getPrefBoolean(PreferKey.koReaderSyncEnabled, false)
++
++    val koReaderPagesBeforeSync
++        get() = appCtx.getPrefString(PreferKey.koReaderPagesBeforeSync, "0")
++            ?.toIntOrNull()?.coerceIn(0, 999) ?: 0
++
++    val koReaderSyncForward
++        get() = appCtx.getPrefString(PreferKey.koReaderSyncForward, KO_READER_SYNC_PROMPT).orEmpty()
++
++    val koReaderSyncBackward
++        get() = appCtx.getPrefString(PreferKey.koReaderSyncBackward, KO_READER_SYNC_DISABLE).orEmpty()
++
++    val koReaderServer
++        get() = appCtx.getPrefString(PreferKey.koReaderServer, KoReaderDefaults.SERVER_URL).orEmpty()
++
++    val koReaderUsername get() = appCtx.getPrefString(PreferKey.koReaderUsername).orEmpty()
++
++    val koReaderPassword get() = appCtx.getPrefString(PreferKey.koReaderPassword).orEmpty()
++
++    val koReaderMatchingMode get() = appCtx.getPrefString(PreferKey.koReaderMatchingMode, KO_READER_MATCH_BINARY).orEmpty()
++
++    val koReaderSendMetadata get() = appCtx.getPrefBoolean(PreferKey.koReaderSendMetadata, false)
++
++    val koReaderDeviceName get() = appCtx.getPrefString(PreferKey.koReaderDeviceName, Build.MODEL).orEmpty()
++
+     val mediaButtonOnExit get() = appCtx.getPrefBoolean("mediaButtonOnExit", true)
+ 
+     val readAloudByMediaButton
+@@ -748,6 +774,12 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
+     val webDavBookAutoRestore
+         get() = appCtx.getPrefBoolean(PreferKey.webDavBookAutoRestore, false)
+ 
++    const val KO_READER_MATCH_BINARY = "binary"
++    const val KO_READER_MATCH_FILENAME = "filename"
++    const val KO_READER_SYNC_SILENT = "silent"
++    const val KO_READER_SYNC_PROMPT = "prompt"
++    const val KO_READER_SYNC_DISABLE = "disable"
++
+     val recordHeapDump get() = appCtx.getPrefBoolean(PreferKey.recordHeapDump, false)
+ 
+     val loadCoverOnlyWifi get() = appCtx.getPrefBoolean(PreferKey.loadCoverOnlyWifi, false)
+diff --git a/app/src/main/java/io/legado/app/help/koReader/AppKoReader.kt b/app/src/main/java/io/legado/app/help/koReader/AppKoReader.kt
+new file mode 100644
+index 000000000..c31b8fa6e
+--- /dev/null
++++ b/app/src/main/java/io/legado/app/help/koReader/AppKoReader.kt
+@@ -0,0 +1,513 @@
++package io.legado.app.help.koReader
++
++import android.os.SystemClock
++import io.legado.app.constant.AppConst
++import io.legado.app.constant.PreferKey
++import io.legado.app.data.appDb
++import io.legado.app.data.entities.Book
++import io.legado.app.data.entities.BookProgress
++import io.legado.app.help.book.isLocal
++import io.legado.app.help.config.AppConfig
++import io.legado.app.help.http.SSLHelper
++import io.legado.app.help.http.newCallResponse
++import io.legado.app.model.ReadBook
++import io.legado.app.model.localBook.EpubFile
++import io.legado.app.model.localBook.LocalBook
++import io.legado.app.utils.MD5Utils
++import io.legado.app.utils.NetworkUtils
++import io.legado.app.utils.getPrefString
++import io.legado.app.utils.putPrefString
++import kotlinx.coroutines.CancellationException
++import org.json.JSONObject
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import okhttp3.ConnectionSpec
++import okhttp3.RequestBody.Companion.toRequestBody
++import okhttp3.MediaType.Companion.toMediaType
++import okhttp3.OkHttpClient
++import splitties.init.appCtx
++import java.io.IOException
++import java.util.Collections
++import java.util.concurrent.ConcurrentHashMap
++import java.util.concurrent.TimeUnit
++
++/** KOReader KOSync client compatible with the API shipped in KOReader v2026.07.2. */
++object AppKoReader {
++    const val DEFAULT_SERVER = KoReaderDefaults.SERVER_URL
++    private const val PERCENTAGE_EPSILON = 0.0001
++    private const val API_CALL_DEBOUNCE_MILLIS = 25_000L
++    private const val ACCEPT = "application/vnd.koreader.v1+json"
++    private val pageTurnTimes = ConcurrentHashMap<String, Long>()
++    private val pageTurnTrackingBooks = Collections.newSetFromMap(
++        ConcurrentHashMap<String, Boolean>()
++    )
++    private val queueLock = Any()
++    @Volatile
++    private var lastPushElapsedMillis = 0L
++    @Volatile
++    private var lastPullElapsedMillis = 0L
++    private val JSON = "application/json; charset=UTF-8".toMediaType()
++    private val httpClient by lazy {
++        OkHttpClient.Builder()
++            .connectTimeout(10, TimeUnit.SECONDS)
++            .writeTimeout(10, TimeUnit.SECONDS)
++            .readTimeout(20, TimeUnit.SECONDS)
++            .callTimeout(30, TimeUnit.SECONDS)
++            .sslSocketFactory(SSLHelper.unsafeSSLSocketFactory, SSLHelper.unsafeTrustManager)
++            .hostnameVerifier(SSLHelper.unsafeHostnameVerifier)
++            .connectionSpecs(
++                listOf(
++                    ConnectionSpec.MODERN_TLS,
++                    ConnectionSpec.COMPATIBLE_TLS,
++                    ConnectionSpec.CLEARTEXT,
++                )
++            )
++            .retryOnConnectionFailure(true)
++            .followRedirects(true)
++            .followSslRedirects(true)
++            .build()
++    }
++
++    data class RemoteProgress(
++        val document: String? = null,
++        val progress: String? = null,
++        val percentage: Double? = null,
++        val device: String? = null,
++        val device_id: String? = null,
++        val timestamp: Double? = null,
++    )
++
++    data class AutoSync(
++        val decision: KoReaderAutoSyncDecision,
++        val remote: RemoteProgress,
++        val progress: BookProgress,
++        val localPercentage: Double,
++        val remotePercentage: Double,
++    )
++
++    val isConfigured: Boolean
++        get() = AppConfig.koReaderSyncEnabled && hasCredentials
++
++    val hasCredentials: Boolean
++        get() =
++            AppConfig.koReaderServer.isNotBlank() &&
++            AppConfig.koReaderUsername.isNotBlank() &&
++            AppConfig.koReaderPassword.isNotBlank()
++
++    val normalizedServerUrl: String
++        get() = KoReaderProgressMapper.normalizeServerUrl(
++            AppConfig.koReaderServer,
++            DEFAULT_SERVER,
++        )
++
++    suspend fun verifyAuthentication() {
++        checkCredentials()
++        request("/users/auth", method = "GET")
++            ?: throw IOException("KOReader 服务未返回账号验证结果")
++    }
++
++    suspend fun getBookProgress(book: Book): RemoteProgress? {
++        checkCredentials()
++        if (!book.isLocal) return null
++        val digest = documentDigest(book)
++        val json = request("/syncs/progress/$digest", method = "GET", allowNotFound = true)
++            ?: return null
++        val body = JSONObject(json)
++        return RemoteProgress(
++            document = body.stringOrNull("document"),
++            progress = body.stringOrNull("progress"),
++            percentage = body.doubleOrNull("percentage")
++                ?.let(KoReaderProgressMapper::normalizePercentage),
++            device = body.stringOrNull("device"),
++            device_id = body.stringOrNull("device_id"),
++            timestamp = body.doubleOrNull("timestamp"),
++        ).takeIf { it.percentage != null }
++    }
++
++    suspend fun uploadBookProgress(
++        book: Book,
++        interactive: Boolean = false,
++    ): RemoteProgress? {
++        checkCredentials()
++        if (!book.isLocal) return null
++        val now = SystemClock.elapsedRealtime()
++        if (!shouldCall(lastPushElapsedMillis, now, interactive)) return null
++        var progress: KoReaderQueuedProgress? = null
++        var queued = false
++        try {
++            progress = buildLocalProgress(book)
++            if (!NetworkUtils.isAvailable()) {
++                enqueueProgress(progress)
++                queued = true
++                throw IOException("网络不可用")
++            }
++            sendQueuedProgress(progress)
++            return RemoteProgress(
++                document = progress.document,
++                progress = progress.progress,
++                percentage = progress.percentage,
++                device = progress.device,
++                device_id = progress.deviceId,
++                timestamp = System.currentTimeMillis() / 1000.0,
++            )
++        } catch (error: Throwable) {
++            if (error is CancellationException) throw error
++            if (!queued && progress != null &&
++                error !is KoReaderAuthenticationException &&
++                error !is KoReaderConfigurationException
++            ) {
++                enqueueProgress(progress)
++            }
++            throw error
++        } finally {
++            lastPushElapsedMillis = now
++        }
++    }
++
++    suspend fun drainUploadQueue(): Int {
++        if (!hasCredentials) return 0
++        val account = accountKey()
++        synchronized(queueLock) {
++            val retained = KoReaderSyncQueue.retainAccount(readQueue(), account)
++            writeQueue(retained)
++        }
++        var sent = 0
++        while (true) {
++            val item = synchronized(queueLock) {
++                KoReaderSyncQueue.firstForAccount(readQueue(), account)
++            } ?: break
++            try {
++                sendQueuedProgress(item)
++            } catch (error: Throwable) {
++                if (error is CancellationException) throw error
++                break
++            }
++            synchronized(queueLock) {
++                writeQueue(KoReaderSyncQueue.remove(readQueue(), item.id))
++            }
++            sent++
++        }
++        return sent
++    }
++
++    fun markPageTurn(book: Book, timestampMillis: Long = System.currentTimeMillis()) {
++        if (book.bookUrl !in pageTurnTrackingBooks) return
++        if (pageTurnTimes.size > 64) pageTurnTimes.clear()
++        pageTurnTimes[book.bookUrl] = timestampMillis / 1000
++    }
++
++    fun resetBookSession(book: Book) {
++        pageTurnTrackingBooks.remove(book.bookUrl)
++        pageTurnTimes.remove(book.bookUrl)
++    }
++
++    fun beginBookSession(book: Book) {
++        pageTurnTimes.remove(book.bookUrl)
++        pageTurnTrackingBooks.add(book.bookUrl)
++    }
++
++    fun clearPageTurn(book: Book) {
++        pageTurnTrackingBooks.remove(book.bookUrl)
++        pageTurnTimes.remove(book.bookUrl)
++    }
++
++    private suspend fun buildLocalProgress(book: Book): KoReaderQueuedProgress {
++        val percentage = currentPercentage(book, currentPageFraction(book))
++        val document = documentDigest(book)
++        val progress = currentProgressToken(book)
++        val device = AppConfig.koReaderDeviceName
++        val sendMetadata = AppConfig.koReaderSendMetadata
++        return KoReaderQueuedProgress(
++            account = accountKey(),
++            document = document,
++            progress = progress,
++            percentage = percentage,
++            device = device,
++            deviceId = AppConst.androidId,
++            filename = book.originName.ifBlank { book.name }.takeIf { sendMetadata },
++            title = book.name.takeIf { sendMetadata },
++            authors = book.author.takeIf { sendMetadata },
++        )
++    }
++
++    private suspend fun sendQueuedProgress(progress: KoReaderQueuedProgress) {
++        val payload = JSONObject()
++            .put("document", progress.document)
++            .put("progress", progress.progress)
++            .put("percentage", progress.percentage)
++            .put("device", progress.device)
++            .put("device_id", progress.deviceId)
++        if (progress.filename != null || progress.title != null || progress.authors != null) {
++            payload.put(
++                "metadata",
++                JSONObject()
++                    .put("filename", progress.filename ?: "")
++                    .put("title", progress.title ?: "")
++                    .put("authors", progress.authors ?: ""),
++            )
++        }
++        request("/syncs/progress", method = "PUT", body = payload.toString())
++            ?: throw IOException("KOReader 服务未确认进度上传")
++    }
++
++    suspend fun getAutoSync(
++        book: Book,
++        interactive: Boolean = false,
++    ): AutoSync? {
++        if (!isConfigured) return null
++        val now = SystemClock.elapsedRealtime()
++        if (!shouldCall(lastPullElapsedMillis, now, interactive)) {
++            pageTurnTrackingBooks.add(book.bookUrl)
++            return null
++        }
++        try {
++            val remote = getBookProgress(book) ?: return null
++            val device = AppConfig.koReaderDeviceName
++            if (remote.device == device && remote.device_id == AppConst.androidId) return null
++            val remotePercentage = remote.percentage ?: return null
++            val localPercentage = currentPercentage(book, currentPageFraction(book))
++            val localProgressToken = currentProgressToken(book)
++            if (remote.progress == localProgressToken) return null
++            val decision = KoReaderSyncPolicy.decide(
++                localPercentage = localPercentage,
++                localTimestampSeconds = pageTurnTimes[book.bookUrl] ?: 0L,
++                remotePercentage = remotePercentage,
++                remoteTimestampSeconds = remote.timestamp,
++                forwardStrategy = AppConfig.koReaderSyncForward,
++                backwardStrategy = AppConfig.koReaderSyncBackward,
++                percentageEpsilon = PERCENTAGE_EPSILON,
++            ) ?: return null
++            val progress = toBookProgress(book, remote) ?: return null
++            return AutoSync(
++                decision = decision,
++                remote = remote,
++                progress = progress,
++                localPercentage = localPercentage,
++                remotePercentage = remotePercentage,
++            )
++        } finally {
++            lastPullElapsedMillis = now
++            pageTurnTrackingBooks.add(book.bookUrl)
++        }
++    }
++
++    suspend fun toBookProgress(book: Book, remote: RemoteProgress): BookProgress? = withContext(Dispatchers.IO) {
++        val percentage = remote.percentage
++            ?.let(KoReaderProgressMapper::normalizePercentage)
++            ?: return@withContext null
++        val chapters = appDb.bookChapterDao.getChapterList(book.bookUrl)
++        if (chapters.isEmpty()) return@withContext null
++        val lengths = EpubFile.getChapterLengths(book, chapters)
++            ?: chapters.map { KoReaderProgressMapper.parseLeadingInt(it.wordCount) }
++        val mapped = mapEpubXPointer(book, chapters, remote.progress, lengths)
++            ?: KoReaderProgressMapper.mapPercentage(percentage, lengths)
++            ?: return@withContext null
++        val chapter = chapters[mapped.first]
++        BookProgress(
++            name = book.name,
++            author = book.author,
++            durChapterIndex = mapped.first,
++            durChapterPos = mapped.second,
++            durChapterTime = remote.timestamp?.times(1000)?.toLong() ?: System.currentTimeMillis(),
++            durChapterTitle = chapter.title,
++        )
++    }
++
++    suspend fun isNewer(book: Book, remote: RemoteProgress): Boolean = withContext(Dispatchers.IO) {
++        val remotePercentage = remote.percentage
++            ?.let(KoReaderProgressMapper::normalizePercentage)
++            ?: return@withContext false
++        KoReaderProgressMapper.isRemoteNewer(
++            localPercentage = currentPercentage(book, currentPageFraction(book)),
++            localTimestampSeconds = pageTurnTimes[book.bookUrl] ?: 0L,
++            remotePercentage = remotePercentage,
++            remoteTimestampSeconds = remote.timestamp,
++            percentageEpsilon = PERCENTAGE_EPSILON,
++        )
++    }
++
++    suspend fun documentDigest(book: Book): String {
++        if (AppConfig.koReaderMatchingMode == AppConfig.KO_READER_MATCH_FILENAME) {
++            return MD5Utils.md5Encode(book.originName.ifBlank { book.name })
++        }
++        LocalBook.getBookInputStream(book).use {
++            return KoReaderProgressMapper.partialMd5(it)
++        }
++    }
++
++    private fun currentPageFraction(book: Book): Double? =
++        ReadBook.takeIf { it.book?.bookUrl == book.bookUrl }?.koReaderPageFraction
++
++    private suspend fun currentPercentage(
++        book: Book,
++        chapterFractionOverride: Double? = null,
++    ): Double {
++        val chapters = appDb.bookChapterDao.getChapterList(book.bookUrl)
++        val lengths = withContext(Dispatchers.IO) {
++            EpubFile.getChapterLengths(book, chapters)
++        } ?: chapters.map { KoReaderProgressMapper.parseLeadingInt(it.wordCount) }
++        return KoReaderProgressMapper.percentage(
++            chapterIndex = book.durChapterIndex,
++            chapterPosition = book.durChapterPos,
++            chapterLengths = lengths,
++            chapterFractionOverride = chapterFractionOverride,
++        )
++    }
++
++    private fun currentProgressToken(book: Book): String {
++        if (book.originName.endsWith(".pdf", ignoreCase = true)) {
++            return (book.durChapterIndex + 1).toString()
++        }
++        if (book.originName.endsWith(".epub", ignoreCase = true)) {
++            appDb.bookChapterDao.getChapter(book.bookUrl, book.durChapterIndex)?.let { chapter ->
++                runCatching {
++                    EpubFile.getChapterProgressToken(book, chapter, book.durChapterPos)
++                }.getOrNull()
++            }?.let { return it }
++            val chapterUrl = appDb.bookChapterDao
++                .getChapter(book.bookUrl, book.durChapterIndex)
++                ?.url
++                ?.substringBefore('#')
++            val spineHrefs = runCatching { EpubFile.getSpineHrefs(book) }
++                .getOrDefault(emptyList())
++            val fragmentIndex = spineHrefs.indexOfFirst {
++                normalizeHref(it) == normalizeHref(chapterUrl)
++            }.takeIf { it >= 0 }?.plus(1) ?: 1
++            return "/body/DocFragment[$fragmentIndex]"
++        }
++        return "/body/DocFragment[1]"
++    }
++
++    private suspend fun request(
++        path: String,
++        method: String,
++        body: String? = null,
++        allowNotFound: Boolean = false,
++    ): String? {
++        val server = KoReaderProgressMapper.normalizeServerUrl(AppConfig.koReaderServer, DEFAULT_SERVER)
++        if (!server.startsWith("http://", true) && !server.startsWith("https://", true)) {
++            throw KoReaderConfigurationException("KOSync 服务器地址仅支持 http:// 或 https://")
++        }
++        val response = try {
++            httpClient.newCallResponse {
++                url(server + path)
++                header("Accept", ACCEPT)
++                header("x-auth-user", AppConfig.koReaderUsername)
++                header("x-auth-key", MD5Utils.md5Encode(AppConfig.koReaderPassword))
++                if (method == "PUT") {
++                    put(requireNotNull(body).toRequestBody(JSON))
++                } else {
++                    get()
++                }
++            }
++        } catch (error: IllegalArgumentException) {
++            throw KoReaderConfigurationException("KOSync 服务器地址格式无效：$server", error)
++        }
++        response.use { result ->
++            val responseBody = result.body.string()
++            if (result.code == 401) throw KoReaderAuthenticationException("KOReader 用户名或密码错误")
++            if (allowNotFound && result.code == 404) return null
++            if (!result.isSuccessful) {
++                throw KoReaderHttpException(
++                    statusCode = result.code,
++                    message = "KOReader 服务返回 HTTP ${result.code}: $responseBody",
++                )
++            }
++            return responseBody
++        }
++    }
++
++    private fun mapEpubXPointer(
++        book: Book,
++        chapters: List<io.legado.app.data.entities.BookChapter>,
++        progressPointer: String?,
++        chapterLengths: List<Int>,
++    ): Pair<Int, Int>? {
++        if (!book.originName.endsWith(".epub", ignoreCase = true)) return null
++        val spineHrefs = runCatching { EpubFile.getSpineHrefs(book) }.getOrDefault(emptyList())
++        val pointer = KoReaderProgressMapper.parseEpubXPointer(progressPointer)
++        if (pointer == null) {
++            val fragmentOrdinal = KoReaderProgressMapper.parseEpubFragmentNumber(progressPointer)
++                ?: return null
++            val shallowHref = spineHrefs.getOrNull(fragmentOrdinal - 1) ?: return null
++            val chapter = chapters.withIndex().singleOrNull {
++                normalizeHref(it.value.url.substringBefore('#')) == normalizeHref(shallowHref)
++            } ?: return null
++            return chapter.index to 0
++        }
++        val spineHref = spineHrefs.getOrNull(pointer.fragmentOrdinal - 1) ?: return null
++        val location = runCatching { EpubFile.getSpineTextLocation(book, pointer) }
++            .getOrNull() ?: return null
++        val sameResource = chapters.withIndex().filter {
++            normalizeHref(it.value.url.substringBefore('#')) == normalizeHref(spineHref)
++        }
++        if (sameResource.isEmpty()) return null
++        val windows = sameResource.map { (index, chapter) ->
++            val start = chapter.startFragmentId
++                ?.let(location.anchorFractions::get)
++                ?: 0.0
++            index to start.coerceIn(0.0, 1.0)
++        }.sortedBy { it.second }
++        val distinctStarts = windows.distinctBy { it.second }
++        val selectedWindow = if (windows.size == 1) {
++            windows.first()
++        } else {
++            if (distinctStarts.size < windows.size) return null
++            distinctStarts.lastOrNull { it.second <= location.positionFraction + PERCENTAGE_EPSILON }
++                ?: distinctStarts.first()
++        }
++        val selectedPosition = distinctStarts.indexOf(selectedWindow).coerceAtLeast(0)
++        val startFraction = selectedWindow.second
++        val endFraction = distinctStarts.getOrNull(selectedPosition + 1)?.second ?: 1.0
++        val span = (endFraction - startFraction).takeIf { it > PERCENTAGE_EPSILON } ?: 1.0
++        val chapterFraction = ((location.positionFraction - startFraction) / span).coerceIn(0.0, 1.0)
++        val chapterLength = chapterLengths.getOrNull(selectedWindow.first)
++            ?.takeIf { it > 0 }
++            ?: 0
++        return selectedWindow.first to (chapterLength * chapterFraction).toInt().coerceAtLeast(0)
++    }
++
++    private fun checkCredentials() {
++        if (AppConfig.koReaderServer.isBlank() ||
++            AppConfig.koReaderUsername.isBlank() ||
++            AppConfig.koReaderPassword.isBlank()
++        ) {
++            throw KoReaderConfigurationException("请填写 KOReader 同步服务器、用户名和密码")
++        }
++    }
++
++    private fun normalizeHref(href: String?): String = href.orEmpty().trimStart('/').substringBefore('#')
++
++    private fun shouldCall(lastCallElapsedMillis: Long, nowElapsedMillis: Long, interactive: Boolean): Boolean =
++        interactive || lastCallElapsedMillis == 0L ||
++            nowElapsedMillis - lastCallElapsedMillis > API_CALL_DEBOUNCE_MILLIS
++
++    private fun accountKey(): String = MD5Utils.md5Encode(
++        "${normalizedServerUrl}\n${AppConfig.koReaderUsername}"
++    )
++
++    private fun readQueue(): String? = appCtx.getPrefString(PreferKey.koReaderUploadQueue)
++
++    private fun writeQueue(raw: String) {
++        appCtx.putPrefString(PreferKey.koReaderUploadQueue, raw)
++    }
++
++    private fun enqueueProgress(progress: KoReaderQueuedProgress) {
++        synchronized(queueLock) {
++            writeQueue(KoReaderSyncQueue.enqueue(readQueue(), progress))
++        }
++    }
++
++    private fun JSONObject.stringOrNull(key: String): String? =
++        if (has(key) && !isNull(key)) optString(key) else null
++
++    private fun JSONObject.doubleOrNull(key: String): Double? =
++        if (has(key) && !isNull(key)) optDouble(key) else null
++
++    class KoReaderAuthenticationException(message: String) : IOException(message)
++    class KoReaderConfigurationException(message: String, cause: Throwable? = null) : IOException(message, cause)
++    class KoReaderHttpException(
++        val statusCode: Int,
++        message: String,
++    ) : IOException(message)
++}
+diff --git a/app/src/main/java/io/legado/app/help/koReader/KoReaderDefaults.kt b/app/src/main/java/io/legado/app/help/koReader/KoReaderDefaults.kt
+new file mode 100644
+index 000000000..8589bdd65
+--- /dev/null
++++ b/app/src/main/java/io/legado/app/help/koReader/KoReaderDefaults.kt
+@@ -0,0 +1,5 @@
++package io.legado.app.help.koReader
++
++object KoReaderDefaults {
++    const val SERVER_URL = "https://kosync.nickthesick.com"
++}
+diff --git a/app/src/main/java/io/legado/app/help/koReader/KoReaderProgressMapper.kt b/app/src/main/java/io/legado/app/help/koReader/KoReaderProgressMapper.kt
+new file mode 100644
+index 000000000..c4a489234
+--- /dev/null
++++ b/app/src/main/java/io/legado/app/help/koReader/KoReaderProgressMapper.kt
+@@ -0,0 +1,204 @@
++package io.legado.app.help.koReader
++
++import java.io.InputStream
++import java.security.MessageDigest
++
++/** Pure protocol helpers shared by runtime code and JVM tests. */
++object KoReaderProgressMapper {
++
++    data class EpubXPointer(
++        val fragmentOrdinal: Int,
++        val nodePath: String,
++        val characterOffset: Int,
++    )
++
++    fun normalizeServerUrl(value: String, defaultServer: String): String {
++        val server = value.trim().trimEnd('/')
++        if (server.isEmpty()) return defaultServer.trimEnd('/')
++        return if (server.startsWith("http://", true) || server.startsWith("https://", true)) {
++            server
++        } else {
++            "https://$server"
++        }
++    }
++
++    /**
++     * KOSync normally stores a fraction (0.68), while some compatible clients have
++     * historically uploaded a percentage (68). Accept both representations so a
++     * pull can never turn 68% into the end of the book.
++     */
++    fun normalizePercentage(value: Double): Double? {
++        if (!value.isFinite()) return null
++        val fraction = if (value > 1.0 && value <= 100.0) value / 100.0 else value
++        return floorToFourDecimals(fraction.coerceIn(0.0, 1.0))
++    }
++
++    fun partialMd5(input: InputStream): String {
++        val digest = MessageDigest.getInstance("MD5")
++        val sample = ByteArray(SAMPLE_SIZE.toInt())
++        var position = 0L
++        for (index in -1..10) {
++            val offset = if (index == -1) 0L else SAMPLE_SIZE shl (index * 2)
++            if (!skipFully(input, offset - position)) break
++            val count = readUpTo(input, sample)
++            if (count == 0) break
++            digest.update(sample, 0, count)
++            position = offset + count
++        }
++        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
++    }
++
++    fun percentage(
++        chapterIndex: Int,
++        chapterPosition: Int,
++        chapterLengths: List<Int>,
++        chapterFractionOverride: Double? = null,
++    ): Double {
++        if (chapterLengths.isEmpty()) return 0.0
++        val weights = chapterLengths.map { it.coerceAtLeast(0).toLong() }
++        val totalLength = weights.sum()
++        val index = chapterIndex.coerceIn(0, chapterLengths.lastIndex)
++        if (totalLength == 0L) {
++            val chapterFraction = 0.0
++            return floorToFourDecimals(((index + chapterFraction) / chapterLengths.size).coerceIn(0.0, 1.0))
++        }
++        val chapterLength = weights[index]
++        val chapterFraction = chapterFractionOverride
++            ?.coerceIn(0.0, 1.0)
++            ?: if (chapterLength > 0) {
++                chapterPosition.coerceIn(0, chapterLengths[index]).toDouble() / chapterLength
++            } else {
++                0.0
++            }
++        val completedLength = weights.take(index).sum()
++        return floorToFourDecimals(
++            ((completedLength + chapterLength * chapterFraction) / totalLength).coerceIn(0.0, 1.0)
++        )
++    }
++
++    fun mapPercentage(percentage: Double, chapterLengths: List<Int>): Pair<Int, Int>? {
++        if (chapterLengths.isEmpty()) return null
++        val bounded = percentage.coerceIn(0.0, 1.0)
++        if (bounded == 1.0) {
++            val last = chapterLengths.lastIndex
++            return last to chapterLengths[last].coerceAtLeast(0)
++        }
++        val weights = chapterLengths.map { it.coerceAtLeast(0).toLong() }
++        val totalLength = weights.sum()
++        if (totalLength > 0L) {
++            val target = bounded * totalLength
++            var completedLength = 0.0
++            weights.forEachIndexed { index, length ->
++                if (target < completedLength + length) {
++                    val position = (chapterLengths[index] * ((target - completedLength) / length))
++                        .toInt()
++                        .coerceAtLeast(0)
++                    return index to position
++                }
++                completedLength += length
++            }
++            val last = chapterLengths.lastIndex
++            return last to chapterLengths[last].coerceAtLeast(0)
++        }
++        val scaled = bounded * chapterLengths.size
++        val index = scaled.toInt().coerceIn(0, chapterLengths.lastIndex)
++        val fraction = scaled - index
++        val position = (chapterLengths[index].coerceAtLeast(0) * fraction).toInt().coerceAtLeast(0)
++        return index to position
++    }
++
++    fun parseEpubFragmentNumber(progress: String?): Int? {
++        val match = EPUB_FRAGMENT.matchEntire(progress.orEmpty()) ?: return null
++        return match.groupValues[1].toIntOrNull()
++    }
++
++    /**
++     * Parses a CreNGINE XPointer such as
++     * `/body/DocFragment[23]/body/div[2]/p[4]/text().12`.
++     */
++    fun parseEpubXPointer(progress: String?): EpubXPointer? {
++        val value = progress?.trim().orEmpty()
++        val marker = "DocFragment["
++        val markerStart = value.indexOf(marker)
++        if (markerStart < 0) return null
++        val ordinalEnd = value.indexOf(']', markerStart + marker.length)
++        if (ordinalEnd <= markerStart) return null
++        val fragmentOrdinal = value.substring(markerStart + marker.length, ordinalEnd).toIntOrNull()
++            ?.takeIf { it > 0 } ?: return null
++        val remainder = value.substring(ordinalEnd + 1)
++            .substringBefore('?')
++            .trim('/')
++        val offsetMatch = XPATH_OFFSET.matchEntire(remainder)
++        val nodePath = (offsetMatch?.groupValues?.get(1) ?: remainder).trim('/')
++        val characterOffset = offsetMatch?.groupValues?.get(2)?.toIntOrNull()
++            ?.takeIf { it >= 0 } ?: 0
++        if (nodePath.isBlank()) return null
++        return EpubXPointer(fragmentOrdinal, nodePath, characterOffset)
++    }
++
++    fun formatEpubElementXPointer(fragmentOrdinal: Int, nodePath: String): String? {
++        if (fragmentOrdinal <= 0) return null
++        val normalizedPath = nodePath.trim('/')
++        if (normalizedPath.isBlank()) return null
++        return "/body/DocFragment[$fragmentOrdinal]/$normalizedPath"
++    }
++
++    fun formatEpubTextXPointer(
++        fragmentOrdinal: Int,
++        nodePath: String,
++        characterOffset: Int,
++    ): String? {
++        if (fragmentOrdinal <= 0 || characterOffset < 0) return null
++        val normalizedPath = nodePath.trim('/')
++        if (normalizedPath.isBlank()) return null
++        return "/body/DocFragment[$fragmentOrdinal]/$normalizedPath.$characterOffset"
++    }
++
++    fun parseLeadingInt(value: String?): Int {
++        return value?.let { FIRST_INT.find(it)?.value?.toIntOrNull() } ?: 0
++    }
++
++    fun isRemoteNewer(
++        localPercentage: Double,
++        localTimestampSeconds: Long,
++        remotePercentage: Double,
++        remoteTimestampSeconds: Double?,
++        percentageEpsilon: Double,
++    ): Boolean {
++        if (remoteTimestampSeconds != null) {
++            return remoteTimestampSeconds > localTimestampSeconds
++        }
++        return remotePercentage > localPercentage + percentageEpsilon
++    }
++
++    private fun floorToFourDecimals(value: Double): Double = kotlin.math.floor(value * 10000) / 10000
++
++    private fun skipFully(input: InputStream, byteCount: Long): Boolean {
++        var remaining = byteCount
++        while (remaining > 0) {
++            val skipped = input.skip(remaining)
++            if (skipped > 0) {
++                remaining -= skipped
++                continue
++            }
++            if (input.read() == -1) return false
++            remaining--
++        }
++        return true
++    }
++
++    private fun readUpTo(input: InputStream, buffer: ByteArray): Int {
++        var total = 0
++        while (total < buffer.size) {
++            val count = input.read(buffer, total, buffer.size - total)
++            if (count == -1) break
++            total += count
++        }
++        return total
++    }
++
++    private const val SAMPLE_SIZE = 1024L
++    private val EPUB_FRAGMENT = Regex(""".*DocFragment\[(\d+)\](?:/.*)?""")
++    private val XPATH_OFFSET = Regex("""^(.*?)(?:\.(\d+))$""")
++    private val FIRST_INT = Regex("""\d+""")
++}
+diff --git a/app/src/main/java/io/legado/app/help/koReader/KoReaderSyncPolicy.kt b/app/src/main/java/io/legado/app/help/koReader/KoReaderSyncPolicy.kt
+new file mode 100644
+index 000000000..6889da1c7
+--- /dev/null
++++ b/app/src/main/java/io/legado/app/help/koReader/KoReaderSyncPolicy.kt
+@@ -0,0 +1,42 @@
++package io.legado.app.help.koReader
++
++import io.legado.app.help.config.AppConfig
++import kotlin.math.abs
++
++enum class KoReaderSyncStrategy(val value: String) {
++    SILENT(AppConfig.KO_READER_SYNC_SILENT),
++    PROMPT(AppConfig.KO_READER_SYNC_PROMPT),
++    DISABLE(AppConfig.KO_READER_SYNC_DISABLE);
++
++    companion object {
++        fun from(value: String?): KoReaderSyncStrategy =
++            entries.firstOrNull { it.value == value } ?: DISABLE
++    }
++}
++
++data class KoReaderAutoSyncDecision(
++    val strategy: KoReaderSyncStrategy,
++    val remoteIsNewer: Boolean,
++)
++
++object KoReaderSyncPolicy {
++    fun decide(
++        localPercentage: Double,
++        localTimestampSeconds: Long,
++        remotePercentage: Double,
++        remoteTimestampSeconds: Double?,
++        forwardStrategy: String,
++        backwardStrategy: String,
++        percentageEpsilon: Double = 0.0001,
++    ): KoReaderAutoSyncDecision? {
++        if (abs(remotePercentage - localPercentage) <= percentageEpsilon) return null
++        val remoteIsNewer = remoteTimestampSeconds
++            ?.let { it > localTimestampSeconds }
++            ?: (remotePercentage > localPercentage)
++        val strategy = KoReaderSyncStrategy.from(
++            if (remoteIsNewer) forwardStrategy else backwardStrategy
++        )
++        return KoReaderAutoSyncDecision(strategy, remoteIsNewer)
++            .takeUnless { strategy == KoReaderSyncStrategy.DISABLE }
++    }
++}
+diff --git a/app/src/main/java/io/legado/app/help/koReader/KoReaderSyncQueue.kt b/app/src/main/java/io/legado/app/help/koReader/KoReaderSyncQueue.kt
+new file mode 100644
+index 000000000..9e6ddc35c
+--- /dev/null
++++ b/app/src/main/java/io/legado/app/help/koReader/KoReaderSyncQueue.kt
+@@ -0,0 +1,78 @@
++package io.legado.app.help.koReader
++
++import com.google.gson.Gson
++import com.google.gson.reflect.TypeToken
++import java.util.UUID
++
++data class KoReaderQueuedProgress(
++    val id: String = UUID.randomUUID().toString(),
++    val account: String,
++    val document: String,
++    val progress: String,
++    val percentage: Double,
++    val device: String,
++    val deviceId: String,
++    val filename: String? = null,
++    val title: String? = null,
++    val authors: String? = null,
++    val queuedAtSeconds: Long = 0,
++)
++
++/** Persisted retry queue following KOReader's KOSyncQueue behavior. */
++object KoReaderSyncQueue {
++    const val MAX_AGE_SECONDS = 28 * 24 * 60 * 60L
++    const val MAX_ENTRIES = 200
++
++    private val gson = Gson()
++    private val entryListType = object : TypeToken<List<KoReaderQueuedProgress>>() {}.type
++
++    fun decode(raw: String?): List<KoReaderQueuedProgress> {
++        if (raw.isNullOrBlank()) return emptyList()
++        return runCatching {
++            gson.fromJson<List<KoReaderQueuedProgress>>(raw, entryListType).orEmpty()
++        }.getOrDefault(emptyList())
++    }
++
++    fun encode(entries: List<KoReaderQueuedProgress>): String = gson.toJson(entries)
++
++    fun enqueue(
++        raw: String?,
++        item: KoReaderQueuedProgress,
++        nowSeconds: Long = System.currentTimeMillis() / 1000,
++    ): String {
++        val queued = item.copy(queuedAtSeconds = nowSeconds)
++        val today = nowSeconds / 86_400
++        val entries = decode(raw)
++            .filter { nowSeconds - it.queuedAtSeconds < MAX_AGE_SECONDS }
++            .filterNot {
++                it.account == queued.account &&
++                    it.document == queued.document &&
++                    it.queuedAtSeconds / 86_400 == today
++            }
++            .toMutableList()
++            .apply { add(queued) }
++        val capped = entries.takeLast(MAX_ENTRIES)
++        return encode(capped)
++    }
++
++    fun firstForAccount(
++        raw: String?,
++        account: String,
++        nowSeconds: Long = System.currentTimeMillis() / 1000,
++    ): KoReaderQueuedProgress? = decode(raw).firstOrNull {
++        it.account == account && nowSeconds - it.queuedAtSeconds < MAX_AGE_SECONDS
++    }
++
++    fun retainAccount(
++        raw: String?,
++        account: String,
++        nowSeconds: Long = System.currentTimeMillis() / 1000,
++    ): String = encode(
++        decode(raw).filter {
++            it.account == account && nowSeconds - it.queuedAtSeconds < MAX_AGE_SECONDS
++        }
++    )
++
++    fun remove(raw: String?, id: String): String =
++        encode(decode(raw).filterNot { it.id == id })
++}
+diff --git a/app/src/main/java/io/legado/app/model/ReadBook.kt b/app/src/main/java/io/legado/app/model/ReadBook.kt
+index 4f16e3fa1..fc4fec06e 100644
+--- a/app/src/main/java/io/legado/app/model/ReadBook.kt
++++ b/app/src/main/java/io/legado/app/model/ReadBook.kt
+@@ -19,6 +19,8 @@ import io.legado.app.data.entities.ReadRecord
+ import io.legado.app.data.entities.updateSnapshot
+ import io.legado.app.data.entities.saveWithCover
+ import io.legado.app.help.AppWebDav
++import io.legado.app.help.koReader.AppKoReader
++import io.legado.app.help.koReader.KoReaderSyncStrategy
+ import io.legado.app.help.HighlightAnchor
+ import io.legado.app.help.HighlightMatcher
+ import io.legado.app.help.HighlightRuleMatcher
+@@ -731,21 +733,21 @@ object ReadBook : CoroutineScope by MainScope() {
+         }
+     }
+ 
+-    fun setProgress(progress: BookProgress) {
++    fun setProgress(progress: BookProgress): Boolean {
+         if (BaseReadAloudService.isRun) {
+             ReadAloud.detachReadAloudFollow()
+         }
+-        if (progress.durChapterIndex < chapterSize &&
+-            (durChapterIndex != progress.durChapterIndex
+-                    || durChapterPos != progress.durChapterPos)
+-        ) {
+-            durChapterIndex = progress.durChapterIndex
+-            durChapterPos = progress.durChapterPos
+-            saveRead()
+-            clearTextChapter()
+-            callBack?.upContent()
+-            loadContent(resetPageOffset = true)
+-        }
++        if (progress.durChapterIndex !in 0 until chapterSize) return false
++        if (durChapterIndex == progress.durChapterIndex &&
++            durChapterPos == progress.durChapterPos
++        ) return false
++        durChapterIndex = progress.durChapterIndex
++        durChapterPos = progress.durChapterPos
++        saveRead()
++        clearTextChapter()
++        callBack?.upContent()
++        loadContent(resetPageOffset = true)
++        return true
+     }
+ 
+     //暂时保存跳转前进度
+@@ -815,6 +817,14 @@ object ReadBook : CoroutineScope by MainScope() {
+     fun uploadProgress(toast: Boolean = false, successAction: (() -> Unit)? = null) {
+         book?.let {
+             launch(IO) {
++                if (AppConfig.koReaderSyncEnabled) {
++                    try {
++                        AppKoReader.uploadBookProgress(it, interactive = toast)
++                    } catch (error: Throwable) {
++                        currentCoroutineContext().ensureActive()
++                        AppLog.put("推送 KOReader 进度失败《${it.name}》\n${error.localizedMessage}", error, toast)
++                    }
++                }
+                 AppWebDav.uploadBookProgress(it, toast) {
+                     successAction?.invoke()
+                 }
+@@ -833,29 +843,57 @@ object ReadBook : CoroutineScope by MainScope() {
+         uploadSuccessAction: (() -> Unit)? = null,
+         syncSuccessAction: (() -> Unit)? = null
+     ) {
+-        if (!AppConfig.syncBookProgress) return
++        if (!AppConfig.syncBookProgress && !AppConfig.koReaderSyncEnabled) return
+         val book = book ?: return
+-        Coroutine.async {
+-            AppWebDav.getBookProgress(book)
+-        }.onError {
+-            AppLog.put("拉取阅读进度失败", it)
+-        }.onSuccess { progress ->
+-            if (progress == null || progress.durChapterIndex < book.durChapterIndex ||
+-                (progress.durChapterIndex == book.durChapterIndex
+-                        && progress.durChapterPos < book.durChapterPos)
+-            ) {
+-                // 服务器没有进度或者进度比服务器快，上传现有进度
+-                Coroutine.async {
+-                    AppWebDav.uploadBookProgress(BookProgress(book), uploadSuccessAction)
+-                    book.update()
++        if (AppConfig.koReaderSyncEnabled) {
++            Coroutine.async {
++                AppKoReader.getAutoSync(book)
++            }.onError {
++                AppLog.put("拉取 KOReader 阅读进度失败《${book.name}》", it)
++            }.onSuccess { autoSync ->
++                autoSync ?: return@onSuccess
++                when (autoSync.decision.strategy) {
++                    KoReaderSyncStrategy.SILENT -> {
++                        setProgress(autoSync.progress)
++                        AppLog.put("自动同步 KOReader 阅读进度成功《${book.name}》")
++                    }
++
++                    KoReaderSyncStrategy.PROMPT -> callBack?.koReaderProgressReady(
++                        progress = autoSync.progress,
++                        device = autoSync.remote.device,
++                        remoteIsNewer = autoSync.decision.remoteIsNewer,
++                        localPercentage = autoSync.localPercentage,
++                        remotePercentage = autoSync.remotePercentage,
++                    )
++
++                    KoReaderSyncStrategy.DISABLE -> Unit
++                }
++            }
++        }
++        if (AppConfig.syncBookProgress) {
++            Coroutine.async {
++                AppWebDav.getBookProgress(book)
++            }.onError {
++                AppLog.put("拉取阅读进度失败", it)
++            }.onSuccess { progress ->
++                if (progress == null || progress.durChapterIndex < book.durChapterIndex ||
++                    (progress.durChapterIndex == book.durChapterIndex
++                            && progress.durChapterPos < book.durChapterPos)
++                ) {
++                    // 服务器没有进度或者进度比服务器快，上传现有进度
++                    Coroutine.async {
++                        AppWebDav.uploadBookProgress(BookProgress(book), uploadSuccessAction)
++                        book.update()
++                    }
++                } else if (progress.durChapterIndex > book.durChapterIndex ||
++                    (progress.durChapterIndex == book.durChapterIndex
++                            && progress.durChapterPos > book.durChapterPos)
++                ) {
++                    // 进度比服务器慢，执行传入动作
++                    newProgressAction?.invoke(progress)
++                } else {
++                    syncSuccessAction?.invoke()
+                 }
+-            } else if (progress.durChapterIndex > book.durChapterIndex ||
+-                progress.durChapterPos > book.durChapterPos
+-            ) {
+-                // 进度比服务器慢，执行传入动作
+-                newProgressAction?.invoke(progress)
+-            } else {
+-                syncSuccessAction?.invoke()
+             }
+         }
+     }
+@@ -1220,6 +1258,18 @@ object ReadBook : CoroutineScope by MainScope() {
+             return curTextChapter?.getPageIndexByCharIndex(durChapterPos) ?: durChapterPos
+         }
+ 
++    /**
++     * KOReader uses current_page / page_count for its progress percentage.
++     * Keep the same one-based page semantics when the current chapter is fully laid out.
++     */
++    val koReaderPageFraction: Double?
++        get() {
++            val textChapter = curTextChapter?.takeIf { it.isCompleted } ?: return null
++            val pageIndex = durPageIndex.takeIf { it >= 0 } ?: return null
++            val pageCount = textChapter.pageSize.takeIf { it > 0 } ?: return null
++            return (pageIndex + 1).coerceAtMost(pageCount).toDouble() / pageCount
++        }
++
+     /**
+      * 是否排版到了当前阅读位置
+      */
+@@ -2197,6 +2247,14 @@ object ReadBook : CoroutineScope by MainScope() {
+ 
+         fun sureNewProgress(progress: BookProgress)
+ 
++        fun koReaderProgressReady(
++            progress: BookProgress,
++            device: String?,
++            remoteIsNewer: Boolean,
++            localPercentage: Double,
++            remotePercentage: Double,
++        )
++
+         fun cancelSelect()
+     }
+ 
+diff --git a/app/src/main/java/io/legado/app/model/localBook/EpubFile.kt b/app/src/main/java/io/legado/app/model/localBook/EpubFile.kt
+index ad3878419..5c570edcb 100644
+--- a/app/src/main/java/io/legado/app/model/localBook/EpubFile.kt
++++ b/app/src/main/java/io/legado/app/model/localBook/EpubFile.kt
+@@ -10,6 +10,7 @@ import io.legado.app.data.entities.Book
+ import io.legado.app.data.entities.BookChapter
+ import io.legado.app.help.book.BookHelp
+ import io.legado.app.help.config.AppConfig
++import io.legado.app.help.koReader.KoReaderProgressMapper
+ import io.legado.app.utils.FileUtils
+ import io.legado.app.utils.HtmlFormatter
+ import io.legado.app.utils.encodeURI
+@@ -22,6 +23,8 @@ import me.ag2s.epublib.epub.EpubReader
+ import me.ag2s.epublib.util.zip.AndroidZipFile
+ import org.jsoup.Jsoup
+ import org.jsoup.nodes.Element
++import org.jsoup.nodes.Node
++import org.jsoup.nodes.TextNode
+ import org.jsoup.parser.Parser
+ import org.jsoup.select.Elements
+ import java.io.File
+@@ -35,6 +38,11 @@ import java.nio.charset.Charset
+ class EpubFile(var book: Book) : AutoCloseable {
+ 
+     companion object : BaseLocalBookParse {
++        data class SpineTextLocation(
++            val positionFraction: Double,
++            val anchorFractions: Map<String, Double>,
++        )
++
+         private val cache = CloseableCache<EpubFile>()
+ 
+         @Synchronized
+@@ -54,6 +62,27 @@ class EpubFile(var book: Book) : AutoCloseable {
+         fun getToc(book: Book): List<EpubTocNode> =
+             epubTocNodes(getEFile(book).epubBook?.tableOfContents?.tocReferences.orEmpty())
+ 
++        @Synchronized
++        fun getSpineHrefs(book: Book): List<String> =
++            getEFile(book).epubBook?.spine?.spineReferences?.map { it.resource.href }.orEmpty()
++
++        @Synchronized
++        fun getSpineTextLocation(
++            book: Book,
++            pointer: KoReaderProgressMapper.EpubXPointer,
++        ): SpineTextLocation? = getEFile(book).getSpineTextLocation(pointer)
++
++        @Synchronized
++        fun getChapterLengths(book: Book, chapters: List<BookChapter>): List<Int>? =
++            getEFile(book).getChapterLengths(chapters)
++
++        @Synchronized
++        fun getChapterProgressToken(
++            book: Book,
++            chapter: BookChapter,
++            chapterPosition: Int,
++        ): String? = getEFile(book).getChapterProgressToken(chapter, chapterPosition)
++
+         @Synchronized
+         override fun getContent(book: Book, chapter: BookChapter): String? {
+             return getEFile(book).getContent(chapter)
+@@ -97,6 +126,8 @@ class EpubFile(var book: Book) : AutoCloseable {
+     private var fileDescriptor: ParcelFileDescriptor? = null
+     private var zipFile: AndroidZipFile? = null
+     private var readingBoundaries: Map<String, BookChapter>? = null
++    private var chapterLengthsCacheKey: List<Pair<String, String?>>? = null
++    private var chapterLengthsCache: List<Int>? = null
+     private val checkedContentCaches = HashSet<String>()
+     private var epubBook: EpubBook? = null
+         get() {
+@@ -146,6 +177,265 @@ class EpubFile(var book: Book) : AutoCloseable {
+         return readingBoundaries?.get(chapter.url) ?: chapter
+     }
+ 
++    private fun getSpineTextLocation(
++        pointer: KoReaderProgressMapper.EpubXPointer,
++    ): Companion.SpineTextLocation? {
++        val resource = epubBook?.spine?.spineReferences
++            ?.getOrNull(pointer.fragmentOrdinal - 1)?.resource ?: return null
++        val body = Jsoup.parse(String(resource.data, mCharset)).body()
++        body.select("script, style, title").remove()
++        val totalLength = textLength(body).coerceAtLeast(1)
++        val anchorFractions = linkedMapOf<String, Double>()
++        collectAnchors(body, 0, anchorFractions, totalLength)
++        val targetLength = findTextTarget(body, pointer.nodePath)
++            ?.let { (start, textNode) ->
++                start + pointer.characterOffset.coerceIn(0, textNode.text().length)
++            } ?: return null
++        return Companion.SpineTextLocation(
++            positionFraction = (targetLength.toDouble() / totalLength).coerceIn(0.0, 1.0),
++            anchorFractions = anchorFractions,
++        )
++    }
++
++    private fun getChapterLengths(chapters: List<BookChapter>): List<Int>? {
++        if (chapters.isEmpty()) return null
++        val cacheKey = chapters.map { it.url to it.startFragmentId }
++        if (chapterLengthsCacheKey == cacheKey) return chapterLengthsCache
++        val spine = epubBook?.spine?.spineReferences ?: return null
++        if (spine.isEmpty()) return null
++        val resourceIndexes = spine.mapIndexed { index, reference ->
++            normalizeHref(reference.resource.href) to index
++        }.toMap()
++        val resourceLengths = IntArray(spine.size)
++        val resourceAnchors = arrayOfNulls<Map<String, Double>>(spine.size)
++        spine.forEachIndexed { index, reference ->
++            val body = Jsoup.parse(String(reference.resource.data, mCharset)).body()
++            body.select("script, style, title").remove()
++            val length = textLength(body)
++            val anchors = linkedMapOf<String, Double>()
++            if (length > 0) collectAnchors(body, 0, anchors, length)
++            resourceLengths[index] = length
++            resourceAnchors[index] = anchors
++        }
++        val resourceStarts = LongArray(spine.size)
++        for (index in 1 until spine.size) {
++            resourceStarts[index] = resourceStarts[index - 1] + resourceLengths[index - 1]
++        }
++        val starts = chapters.map { chapter ->
++            val resourceIndex = resourceIndexes[normalizeHref(chapter.url)] ?: return null
++            val fragmentFraction = chapter.startFragmentId
++                ?.takeIf { it.isNotBlank() }
++                ?.let { resourceAnchors[resourceIndex]?.get(it) }
++                ?: 0.0
++            resourceStarts[resourceIndex] +
++                (resourceLengths[resourceIndex] * fragmentFraction).toLong()
++        }
++        if (starts.zipWithNext().any { (left, right) -> right < left }) return null
++        val totalLength = resourceStarts[resourceStarts.lastIndex] +
++            resourceLengths[resourceLengths.lastIndex]
++        val lengths = starts.mapIndexed { index, start ->
++            val end = starts.getOrNull(index + 1) ?: totalLength
++            (end - start).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
++        }
++        if (lengths.sumOf { it.toLong() } == 0L) return null
++        chapterLengthsCacheKey = cacheKey
++        chapterLengthsCache = lengths
++        return lengths
++    }
++
++    private fun getChapterProgressToken(
++        chapter: BookChapter,
++        chapterPosition: Int,
++    ): String? {
++        val spine = epubBook?.spine?.spineReferences ?: return null
++        val href = normalizeHref(chapter.url)
++        val fragmentOrdinal = spine.indexOfFirst {
++            normalizeHref(it.resource.href) == href
++        }.takeIf { it >= 0 }?.plus(1) ?: return null
++        val anchorId = chapter.startFragmentId
++            ?.takeIf { it.isNotBlank() }
++            ?: chapter.url.substringAfter('#', "").takeIf { it.isNotBlank() }
++        val body = Jsoup.parse(
++            String(spine[fragmentOrdinal - 1].resource.data, mCharset)
++        ).body()
++        val anchor = anchorId?.let { id ->
++            body.getElementById(id)
++                ?: runCatching {
++                    body.getElementById(URLDecoder.decode(id, "UTF-8"))
++                }.getOrNull()
++                ?: findChapterTitleAnchor(body, chapter.title)
++        }
++        if (anchorId != null && anchor == null) return null
++        if (anchor == null && !hasSingleChapterForResource(href)) {
++            return "/body/DocFragment[$fragmentOrdinal]"
++        }
++        val anchorOffset = anchor?.let { element ->
++            firstTextNode(element)?.let { textStart(body, it) }
++        } ?: 0
++        val targetOffset = anchorOffset + chapterPosition.coerceAtLeast(0)
++        findTextNodeAt(body, targetOffset)?.let { (textNode, characterOffset) ->
++            val parent = textNode.parent() ?: return@let
++            val nodePath = elementPath(body, parent) ?: return@let
++            return KoReaderProgressMapper.formatEpubTextXPointer(
++                fragmentOrdinal = fragmentOrdinal,
++                nodePath = "$nodePath/text()",
++                characterOffset = characterOffset,
++            )
++        }
++        if (anchor == null) return "/body/DocFragment[$fragmentOrdinal]"
++        val nodePath = elementPath(body, anchor) ?: return null
++        return KoReaderProgressMapper.formatEpubElementXPointer(fragmentOrdinal, nodePath)
++    }
++
++    private fun hasSingleChapterForResource(href: String): Boolean {
++        if (readingBoundaries == null) getChapterList()
++        return readingBoundaries?.values?.count { normalizeHref(it.url) == href } == 1
++    }
++
++    private fun findTextNodeAt(body: Element, targetOffset: Int): Pair<TextNode, Int>? {
++        var offset = 0
++        var result: Pair<TextNode, Int>? = null
++        fun visit(node: Node) {
++            if (result != null) return
++            if (node is TextNode) {
++                val textLength = node.text().length
++                if (textLength > 0 && targetOffset <= offset + textLength) {
++                    result = node to (targetOffset - offset).coerceIn(0, textLength)
++                } else {
++                    offset += textLength
++                }
++            } else {
++                node.childNodes().forEach(::visit)
++            }
++        }
++        visit(body)
++        return result
++    }
++
++    private fun elementPath(body: Element, target: Element): String? {
++        val segments = mutableListOf<String>()
++        var current: Element = target
++        while (current !== body) {
++            val parent = current.parent() ?: return null
++            val tagName = current.tagName()
++            val index = parent.children()
++                .filter { it.tagName().equals(tagName, true) }
++                .indexOfFirst { it === current }
++                .takeIf { it >= 0 }?.plus(1) ?: return null
++            segments.add(0, "$tagName[$index]")
++            current = parent
++        }
++        if (segments.isEmpty()) return null
++        return "body/${segments.joinToString("/")}"
++    }
++
++    private fun findChapterTitleAnchor(body: Element, title: String): Element? {
++        val expected = normalizeChapterTitle(title)
++        if (expected.length < 2) return null
++        return body.getAllElements().asSequence()
++            .filter { it !== body }
++            .mapNotNull { element ->
++                val text = normalizeChapterTitle(element.text())
++                element.takeIf { text.isNotEmpty() && text.contains(expected) }
++            }
++            .minByOrNull { normalizeChapterTitle(it.text()).length }
++    }
++
++    private fun normalizeChapterTitle(value: String): String =
++        value.filterNot { it.isWhitespace() || it == '\u00A0' }
++
++    private fun textLength(node: Node): Int = when (node) {
++        is TextNode -> node.text().length
++        is Element -> node.childNodes().sumOf(::textLength)
++        else -> node.childNodes().sumOf(::textLength)
++    }
++
++    private fun collectAnchors(
++        node: Node,
++        start: Int,
++        anchors: MutableMap<String, Double>,
++        totalLength: Int,
++    ): Int {
++        var offset = start
++        if (node is Element && node.id().isNotBlank()) {
++            anchors.putIfAbsent(node.id(), (offset.toDouble() / totalLength).coerceIn(0.0, 1.0))
++        }
++        when (node) {
++            is TextNode -> offset += node.text().length
++            else -> node.childNodes().forEach { child ->
++                offset = collectAnchors(child, offset, anchors, totalLength)
++            }
++        }
++        return offset
++    }
++
++    private fun findTextTarget(body: Element, nodePath: String): Pair<Int, TextNode>? {
++        var current: Node = body
++        val segments = nodePath.split('/').filter { it.isNotBlank() }
++        for ((segmentIndex, segment) in segments.withIndex()) {
++            if (segment == "body" && current === body) continue
++            val element = current as? Element ?: return null
++            val textSegment = TEXT_SEGMENT.matchEntire(segment)
++            if (textSegment != null) {
++                val textIndex = (textSegment.groupValues[1].toIntOrNull()?.minus(1) ?: 0)
++                    .coerceAtLeast(0)
++                val textNodes = element.childNodes().filterIsInstance<TextNode>()
++                when {
++                    textNodes.isNotEmpty() -> {
++                        current = textNodes.getOrNull(textIndex) ?: return null
++                    }
++
++                    segmentIndex < segments.lastIndex -> return null
++                    else -> {
++                        val firstText = firstTextNode(element) ?: return null
++                        return textStart(body, firstText)?.let { it to firstText }
++                    }
++                }
++                continue
++            }
++            val elementSegment = ELEMENT_SEGMENT.matchEntire(segment) ?: return null
++            val tagName = elementSegment.groupValues[1]
++            val elementIndex = (elementSegment.groupValues[2].toIntOrNull()?.minus(1) ?: 0)
++                .coerceAtLeast(0)
++            current = element.children().filter { it.tagName().equals(tagName, true) }
++                .getOrNull(elementIndex) ?: return null
++        }
++        return when (val target = current) {
++            is TextNode -> textStart(body, target)?.let { it to target }
++            is Element -> firstTextNode(target)?.let { textStart(body, it)?.let { start -> start to it } }
++            else -> null
++        }
++    }
++
++    private fun firstTextNode(element: Element): TextNode? {
++        element.childNodes().forEach { child ->
++            when (child) {
++                is TextNode -> if (child.text().isNotEmpty()) return child
++                is Element -> firstTextNode(child)?.let { return it }
++            }
++        }
++        return null
++    }
++
++    private fun textStart(root: Node, target: TextNode): Int? {
++        var offset = 0
++        var found = false
++        fun visit(node: Node) {
++            if (found) return
++            if (node === target) {
++                found = true
++                return
++            }
++            if (node is TextNode) {
++                offset += node.text().length
++            } else {
++                node.childNodes().forEach(::visit)
++            }
++        }
++        visit(root)
++        return offset.takeIf { found }
++    }
++
+     private fun repairCachedContent(chapter: BookChapter, content: String): String {
+         val boundary = readingBoundary(chapter)
+         if (!checkedContentCaches.add(chapter.url)) return content
+@@ -476,6 +766,8 @@ class EpubFile(var book: Book) : AutoCloseable {
+ 
+     override fun close() {
+         readingBoundaries = null
++        chapterLengthsCacheKey = null
++        chapterLengthsCache = null
+         checkedContentCaches.clear()
+         epubBookContents = null
+         epubBook = null
+@@ -511,4 +803,10 @@ class EpubFile(var book: Book) : AutoCloseable {
+         }
+     }
+ 
++    private fun normalizeHref(href: String?): String =
++        href.orEmpty().trimStart('/').substringBefore('#')
++
++    private val TEXT_SEGMENT = Regex("""text\((?:\[(\d+)])?\)""")
++    private val ELEMENT_SEGMENT = Regex("""([A-Za-z][\w:.-]*)(?:\[(\d+)])?""")
++
+ }
+diff --git a/app/src/main/java/io/legado/app/ui/book/group/GroupEditDialog.kt b/app/src/main/java/io/legado/app/ui/book/group/GroupEditDialog.kt
+index 2d842d8d5..a60dd64da 100644
+--- a/app/src/main/java/io/legado/app/ui/book/group/GroupEditDialog.kt
++++ b/app/src/main/java/io/legado/app/ui/book/group/GroupEditDialog.kt
+@@ -162,7 +162,7 @@ class GroupEditDialog() : BaseDialogFragment(R.layout.dialog_book_group_edit) {
+     }
+ 
+     private fun deleteGroup(ok: () -> Unit) {
+-        alert(R.string.delete, R.string.sure_del) {
++        alert(R.string.delete, R.string.book_group_delete_message) {
+             yesButton {
+                 ok.invoke()
+             }
+diff --git a/app/src/main/java/io/legado/app/ui/book/group/GroupManageDialog.kt b/app/src/main/java/io/legado/app/ui/book/group/GroupManageDialog.kt
+index eeee1bf41..fc695ed7c 100644
+--- a/app/src/main/java/io/legado/app/ui/book/group/GroupManageDialog.kt
++++ b/app/src/main/java/io/legado/app/ui/book/group/GroupManageDialog.kt
+@@ -20,6 +20,7 @@ import io.legado.app.data.appDb
+ import io.legado.app.data.entities.BookGroup
+ import io.legado.app.databinding.DialogRecyclerViewBinding
+ import io.legado.app.databinding.ItemBookGroupManageBinding
++import io.legado.app.lib.dialogs.alert
+ import io.legado.app.lib.theme.accentColor
+ import io.legado.app.lib.theme.backgroundColor
+ import io.legado.app.lib.theme.primaryColor
+@@ -123,6 +124,7 @@ class GroupManageDialog : BaseDialogFragment(R.layout.dialog_recycler_view),
+                 root.setBackgroundColor(context.backgroundColor)
+                 tvGroup.text = item.getManageName(context)
+                 swShow.isChecked = item.show
++                tvDel.visible(item.groupId > 0)
+             }
+         }
+ 
+@@ -135,6 +137,11 @@ class GroupManageDialog : BaseDialogFragment(R.layout.dialog_recycler_view),
+                         )
+                     }
+                 }
++                tvDel.setOnClickListener {
++                    getItem(holder.layoutPosition)?.let { bookGroup ->
++                        confirmDeleteGroup(bookGroup)
++                    }
++                }
+                 swShow.setOnUserCheckedChangeListener { isChecked ->
+                     getItem(holder.layoutPosition)?.let {
+                         viewModel.upGroup(it.copy(show = isChecked))
+@@ -160,4 +167,13 @@ class GroupManageDialog : BaseDialogFragment(R.layout.dialog_recycler_view),
+         }
+     }
+ 
++    private fun confirmDeleteGroup(bookGroup: BookGroup) {
++        alert(R.string.delete, R.string.book_group_delete_message) {
++            yesButton {
++                viewModel.delGroup(bookGroup) {}
++            }
++            noButton()
++        }
++    }
++
+ }
+diff --git a/app/src/main/java/io/legado/app/ui/book/group/GroupViewModel.kt b/app/src/main/java/io/legado/app/ui/book/group/GroupViewModel.kt
+index 450feb686..0af24b17b 100644
+--- a/app/src/main/java/io/legado/app/ui/book/group/GroupViewModel.kt
++++ b/app/src/main/java/io/legado/app/ui/book/group/GroupViewModel.kt
+@@ -43,12 +43,14 @@ class GroupViewModel(application: Application) : BaseViewModel(application) {
+ 
+     fun delGroup(bookGroup: BookGroup, finally: () -> Unit) {
+         execute {
+-            appDb.bookGroupDao.delete(bookGroup)
+-            appDb.bookDao.removeGroup(bookGroup.groupId)
++            appDb.runInTransaction {
++                appDb.bookDao.removeGroup(bookGroup.groupId)
++                appDb.bookGroupDao.delete(bookGroup)
++            }
+         }.onFinally {
+             finally()
+         }
+     }
+ 
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/io/legado/app/ui/book/read/ReadBookActivity.kt b/app/src/main/java/io/legado/app/ui/book/read/ReadBookActivity.kt
+index 9d902558e..09d9ec133 100644
+--- a/app/src/main/java/io/legado/app/ui/book/read/ReadBookActivity.kt
++++ b/app/src/main/java/io/legado/app/ui/book/read/ReadBookActivity.kt
+@@ -46,6 +46,7 @@ import io.legado.app.data.entities.Bookmark
+ import io.legado.app.data.entities.rule.ReviewRule
+ import io.legado.app.exception.NoStackTraceException
+ import io.legado.app.help.AppWebDav
++import io.legado.app.help.koReader.AppKoReader
+ import io.legado.app.help.HighlightColors
+ import io.legado.app.help.HighlightStyle
+ import io.legado.app.help.HighlightStyles
+@@ -100,6 +101,7 @@ import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.TEXT_ACCEN
+ import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.TEXT_COLOR
+ import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.UNDERLINE_COLOR
+ import io.legado.app.ui.book.read.config.MoreConfigDialog
++import io.legado.app.ui.book.read.config.KoReaderSyncDialog
+ import io.legado.app.ui.book.read.config.ReadAloudDialog
+ import io.legado.app.ui.book.read.config.ReaderMenuConfigDialog
+ import io.legado.app.ui.book.read.config.ReadStyleDialog
+@@ -304,6 +306,11 @@ class ReadBookActivity : BaseReadBookActivity(),
+     private val prevPageDebounce by lazy { Debounce { keyPage(PageDirection.PREV) } }
+     private var bookChanged = false
+     private var pageChanged = false
++    private var koReaderPageCounter = 0
++    private var koReaderLastPosition: Pair<Int, Int>? = null
++    private var koReaderPageSyncJob: Job? = null
++    private var koReaderPageSyncScheduled = false
++    private var koReaderPageSyncGeneration = 0
+     private val aloudControls by lazy {
+         ReadAloudControls(binding.readAloudFloatBarContainer) { updateReadAloudFloatBar() }
+     }
+@@ -479,8 +486,24 @@ class ReadBookActivity : BaseReadBookActivity(),
+         networkChangedListener.register()
+         networkChangedListener.onNetworkChanged = {
+             // 当网络是可用状态且无需初始化时同步进度（初始化中已有同步进度逻辑）
+-            if (AppConfig.syncBookProgressPlus && NetworkUtils.isAvailable() && !justInitData && ReadBook.inBookshelf) {
+-                ReadBook.syncProgress({ progress -> sureNewProgress(progress) })
++            if ((AppConfig.syncBookProgressPlus || AppConfig.koReaderSyncEnabled) &&
++                NetworkUtils.isAvailable() && !justInitData && ReadBook.inBookshelf
++            ) {
++                lifecycleScope.launch {
++                    if (AppConfig.koReaderSyncEnabled) {
++                        runCatching {
++                            withContext(IO) { AppKoReader.drainUploadQueue() }
++                        }.onFailure {
++                            if (it is CancellationException) throw it
++                            AppLog.put("重试 KOReader 待上传进度失败", it)
++                        }
++                    }
++                    withContext(Main) {
++                        ReadBook.syncProgress(
++                            newProgressAction = { progress -> sureNewProgress(progress) }
++                        )
++                    }
++                }
+             }
+         }
+     }
+@@ -509,13 +532,21 @@ class ReadBookActivity : BaseReadBookActivity(),
+         binding.readView.updateScrollReadPosition()
+         ReadBook.saveRead()
+         ReadBook.cancelPreDownloadTask()
++        koReaderPageSyncJob?.cancel()
++        koReaderPageSyncGeneration++
++        koReaderPageSyncScheduled = false
++        koReaderPageCounter = 0
+         unregisterReceiver(timeBatteryReceiver)
+         upSystemUiVisibility()
+-        if (!BuildConfig.DEBUG && ReadBook.inBookshelf) {
+-            if (AppConfig.syncBookProgressPlus) {
+-                ReadBook.syncProgress()
+-            } else {
+-                ReadBook.uploadProgress()
++        if (ReadBook.inBookshelf) {
++            when {
++                AppConfig.syncBookProgressPlus -> {
++                    pushKoReaderProgress()
++                    ReadBook.syncProgress()
++                }
++
++                AppConfig.syncBookProgress -> ReadBook.uploadProgress()
++                AppConfig.koReaderSyncEnabled -> pushKoReaderProgress()
+             }
+         }
+         if (!BuildConfig.DEBUG) {
+@@ -595,11 +626,13 @@ class ReadBookActivity : BaseReadBookActivity(),
+             }
+         }
+         lifecycleScope.launch {
+-            val show = ReadBook.inBookshelf && withContext(IO) {
+-                AppWebDav.isOk
+-            }
++            val show = ReadBook.inBookshelf && (
++                AppKoReader.isConfigured || withContext(IO) { AppWebDav.isOk }
++            )
+             menu.findItem(R.id.menu_get_progress)?.isVisible = show
+             menu.findItem(R.id.menu_cover_progress)?.isVisible = show
++            menu.findItem(R.id.menu_koreader_sync)?.isVisible =
++                ReadBook.inBookshelf
+             menu.findItem(R.id.menu_reader_more)?.isVisible = hasHiddenReaderItems(menu)
+         }
+         menu.findItem(R.id.menu_reader_more)?.isVisible = hasHiddenReaderItems(menu)
+@@ -624,7 +657,17 @@ class ReadBookActivity : BaseReadBookActivity(),
+             .forEach { primaryItems += it }
+ 
+         val popupItems = buildList {
+-            addAll(primaryItems.map(::toReaderPopupItem))
++            add(
++                PopupAction.PopupActionItem(
++                    title = getString(R.string.koreader_sync),
++                    value = ACTION_KOREADER_SYNC
++                )
++            )
++            addAll(
++                primaryItems
++                    .filterNot { it.itemId == R.id.menu_koreader_sync }
++                    .map(::toReaderPopupItem)
++            )
+             if (moreItems.isNotEmpty()) {
+                 add(
+                     PopupAction.PopupActionItem(
+@@ -648,6 +691,7 @@ class ReadBookActivity : BaseReadBookActivity(),
+         popup.onActionClick = { action ->
+             popup.dismiss()
+             when {
++                action == ACTION_KOREADER_SYNC -> showDialogFragment(KoReaderSyncDialog())
+                 action == ACTION_READER_MORE -> showReaderMoreMenu(anchor, menu)
+                 action == ACTION_READER_CONFIG -> showReaderMenuConfig()
+                 action.startsWith(ACTION_READER_ITEM_PREFIX) -> action
+@@ -936,6 +980,8 @@ class ReadBookActivity : BaseReadBookActivity(),
+                 }
+             }
+ 
++            R.id.menu_koreader_sync -> showDialogFragment(KoReaderSyncDialog())
++
+             R.id.menu_cover_progress -> ReadBook.book?.let {
+                 ReadBook.uploadProgress(true) { toastOnUi(R.string.upload_book_success) }
+             }
+@@ -1612,6 +1658,7 @@ class ReadBookActivity : BaseReadBookActivity(),
+      */
+     override fun pageChanged() {
+         pageChanged = true
++        scheduleKoReaderPageSync()
+         if (!isScroll) aloudControls.onMovement(100f)
+         binding.readView.onPageChange()
+         highlightPopup?.dismiss()
+@@ -1625,6 +1672,60 @@ class ReadBookActivity : BaseReadBookActivity(),
+         }
+     }
+ 
++    private fun scheduleKoReaderPageSync() {
++        if (!AppConfig.koReaderSyncEnabled) return
++        ReadBook.book?.let { AppKoReader.markPageTurn(it) }
++        if (!AppKoReader.hasCredentials) return
++        val threshold = AppConfig.koReaderPagesBeforeSync
++        if (threshold <= 0 || !ReadBook.inBookshelf) return
++        val position = ReadBook.durChapterIndex to ReadBook.durChapterPos
++        if (position == koReaderLastPosition) return
++        koReaderLastPosition = position
++        if (koReaderPageSyncScheduled) {
++            scheduleKoReaderPushAfterIdle()
++            return
++        }
++        koReaderPageCounter++
++        if (koReaderPageCounter < threshold) return
++        scheduleKoReaderPushAfterIdle()
++    }
++
++    private fun scheduleKoReaderPushAfterIdle() {
++        koReaderPageSyncScheduled = true
++        koReaderPageSyncJob?.cancel()
++        val generation = ++koReaderPageSyncGeneration
++        koReaderPageSyncJob = lifecycleScope.launch {
++            delay(10_000)
++            try {
++                val book = ReadBook.book?.takeIf { it.isLocal } ?: return@launch
++                runCatching {
++                    withContext(IO) { AppKoReader.uploadBookProgress(book) }
++                }.onFailure {
++                    if (it is CancellationException) throw it
++                    AppLog.put("分页触发 KOReader 进度同步失败《${book.name}》", it)
++                }
++            } finally {
++                if (generation == koReaderPageSyncGeneration) {
++                    koReaderPageSyncScheduled = false
++                    koReaderPageCounter = 0
++                }
++            }
++        }
++    }
++
++    private fun pushKoReaderProgress() {
++        if (!AppConfig.koReaderSyncEnabled) return
++        val book = ReadBook.book?.takeIf { it.isLocal } ?: return
++        lifecycleScope.launch(IO) {
++            runCatching {
++                AppKoReader.uploadBookProgress(book, interactive = false)
++            }.onFailure {
++                if (it is CancellationException) throw it
++                AppLog.put("推送 KOReader 阅读进度失败《${book.name}》", it)
++            }
++        }
++    }
++
+     override fun onReadScroll(offset: Int) {
+         if (BaseReadAloudService.isRun && !isAutoPage) {
+             ReadAloud.detachReadAloudFollow()
+@@ -2901,6 +3002,39 @@ class ReadBookActivity : BaseReadBookActivity(),
+         }
+     }
+ 
++    override fun koReaderProgressReady(
++        progress: BookProgress,
++        device: String?,
++        remoteIsNewer: Boolean,
++        localPercentage: Double,
++        remotePercentage: Double,
++    ) {
++        syncDialog?.dismiss()
++        val direction = getString(
++            if (remoteIsNewer) R.string.koreader_prompt_newer else R.string.koreader_prompt_older
++        )
++        val deviceName = device?.takeIf { it.isNotBlank() } ?: getString(R.string.koreader_unknown_device)
++        syncDialog = alert(R.string.koreader_sync) {
++            setMessage(
++                getString(
++                    R.string.koreader_prompt_message,
++                    getString(R.string.koreader_progress_percentage, localPercentage * 100),
++                    getString(R.string.koreader_progress_percentage, remotePercentage * 100),
++                    direction,
++                    deviceName,
++                    progress.durChapterTitle,
++                )
++            )
++            okButton {
++                ReadAloud.detachReadAloudFollow()
++                if (ReadBook.setProgress(progress)) {
++                    toastOnUi(R.string.koreader_progress_pulled)
++                }
++            }
++            noButton()
++        }
++    }
++
+     override fun finish() {
+         val book = ReadBook.book ?: return super.finish()
+         if (ReadBook.inBookshelf) {
+@@ -3098,6 +3232,7 @@ class ReadBookActivity : BaseReadBookActivity(),
+         private const val REVIEW_DIALOG_REQUEST_COOLDOWN_MS = 1500L
+         const val RESULT_DELETED = 100
+         private const val ACTION_READER_ITEM_PREFIX = "readerItem:"
++        private const val ACTION_KOREADER_SYNC = "koReaderSync"
+         private const val ACTION_READER_MORE = "readerMore"
+         private const val ACTION_READER_CONFIG = "readerConfig"
+         private const val ACTION_HIGHLIGHT_STYLE = "highlightStyle"
+diff --git a/app/src/main/java/io/legado/app/ui/book/read/ReadBookViewModel.kt b/app/src/main/java/io/legado/app/ui/book/read/ReadBookViewModel.kt
+index 7b7b659e8..30e80f0e5 100644
+--- a/app/src/main/java/io/legado/app/ui/book/read/ReadBookViewModel.kt
++++ b/app/src/main/java/io/legado/app/ui/book/read/ReadBookViewModel.kt
+@@ -17,6 +17,8 @@ import io.legado.app.data.entities.BookChapter
+ import io.legado.app.data.entities.BookProgress
+ import io.legado.app.exception.NoStackTraceException
+ import io.legado.app.help.AppWebDav
++import io.legado.app.help.koReader.AppKoReader
++import io.legado.app.help.koReader.KoReaderSyncStrategy
+ import io.legado.app.help.book.BookHelp
+ import io.legado.app.help.book.ContentProcessor
+ import io.legado.app.help.book.ResourceThemeGeneration
+@@ -147,6 +149,7 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
+ 
+     private suspend fun initBook(book: Book) {
+         val isSameBook = ReadBook.book?.bookUrl == book.bookUrl
++        AppKoReader.resetBookSession(book)
+         if (isSameBook) {
+             ReadBook.upData(book)
+         } else {
+@@ -179,6 +182,7 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
+                 }
+             }
+         }
++        AppKoReader.beginBookSession(book)
+         if (ReadBook.chapterChanged) {
+             // 有章节跳转不同步阅读进度
+             ReadBook.chapterChanged = false
+@@ -289,6 +293,37 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
+         book: Book,
+         alertSync: ((progress: BookProgress) -> Unit)? = null
+     ) {
++        if (!AppConfig.syncBookProgress && !AppConfig.koReaderSyncEnabled) return
++        if (AppConfig.koReaderSyncEnabled) {
++            execute {
++                AppKoReader.getAutoSync(book)
++            }.onError {
++                AppLog.put("拉取 KOReader 阅读进度失败《${book.name}》\n${it.localizedMessage}", it)
++            }.onSuccess { autoSync ->
++                autoSync ?: return@onSuccess
++                val progress = autoSync.progress
++                if (progress.durChapterIndex >= book.simulatedTotalChapterNum()) {
++                    return@onSuccess
++                }
++                when (autoSync.decision.strategy) {
++                    KoReaderSyncStrategy.SILENT -> {
++                        ReadBook.setProgress(progress)
++                        AppLog.put("自动同步 KOReader 阅读进度成功《${book.name}》 ${progress.durChapterTitle}")
++                        context.toastOnUi("已从 KOReader 同步阅读进度")
++                    }
++
++                    KoReaderSyncStrategy.PROMPT -> ReadBook.callBack?.koReaderProgressReady(
++                        progress = progress,
++                        device = autoSync.remote.device,
++                        remoteIsNewer = autoSync.decision.remoteIsNewer,
++                        localPercentage = autoSync.localPercentage,
++                        remotePercentage = autoSync.remotePercentage,
++                    )
++
++                    KoReaderSyncStrategy.DISABLE -> Unit
++                }
++            }
++        }
+         if (!AppConfig.syncBookProgress) return
+         execute {
+             AppWebDav.getBookProgress(book)
+diff --git a/app/src/main/java/io/legado/app/ui/book/read/ReaderMenuItem.kt b/app/src/main/java/io/legado/app/ui/book/read/ReaderMenuItem.kt
+index 2b393d0d7..39e933778 100644
+--- a/app/src/main/java/io/legado/app/ui/book/read/ReaderMenuItem.kt
++++ b/app/src/main/java/io/legado/app/ui/book/read/ReaderMenuItem.kt
+@@ -20,6 +20,7 @@ enum class ReaderMenuItem(
+     EditContent("editContent", intArrayOf(R.id.menu_edit_content), R.string.edit_content),
+     PageAnim("pageAnim", intArrayOf(R.id.menu_page_anim), R.string.book_page_anim),
+     GetProgress("getProgress", intArrayOf(R.id.menu_get_progress), R.string.get_book_progress),
++    KoReaderSync("koReaderSync", intArrayOf(R.id.menu_koreader_sync), R.string.koreader_sync),
+     CoverProgress("coverProgress", intArrayOf(R.id.menu_cover_progress), R.string.cover_book_progress),
+     ReverseContent("reverseContent", intArrayOf(R.id.menu_reverse_content), R.string.reverse_content),
+     SimulatedReading(
+diff --git a/app/src/main/java/io/legado/app/ui/book/read/config/KoReaderSyncDialog.kt b/app/src/main/java/io/legado/app/ui/book/read/config/KoReaderSyncDialog.kt
+new file mode 100644
+index 000000000..46a4c077e
+--- /dev/null
++++ b/app/src/main/java/io/legado/app/ui/book/read/config/KoReaderSyncDialog.kt
+@@ -0,0 +1,227 @@
++package io.legado.app.ui.book.read.config
++
++import android.content.Intent
++import android.content.SharedPreferences
++import android.os.Bundle
++import android.view.LayoutInflater
++import android.view.View
++import android.view.ViewGroup
++import android.widget.LinearLayout
++import androidx.lifecycle.lifecycleScope
++import androidx.preference.ListPreference
++import androidx.preference.Preference
++import io.legado.app.R
++import io.legado.app.base.BasePrefDialogFragment
++import io.legado.app.constant.AppLog
++import io.legado.app.constant.PreferKey
++import io.legado.app.help.config.AppConfig
++import io.legado.app.help.koReader.AppKoReader
++import io.legado.app.help.book.isLocal
++import io.legado.app.lib.prefs.SwitchPreference
++import io.legado.app.lib.prefs.fragment.PreferenceFragment
++import io.legado.app.lib.theme.backgroundColor
++import io.legado.app.lib.theme.primaryColor
++import io.legado.app.model.ReadBook
++import io.legado.app.ui.config.ConfigActivity
++import io.legado.app.ui.config.ConfigTag
++import io.legado.app.ui.widget.number.NumberPickerDialog
++import io.legado.app.utils.setEdgeEffectColor
++import io.legado.app.utils.setLayout
++import io.legado.app.utils.toastOnUi
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.Dispatchers.IO
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++
++class KoReaderSyncDialog : BasePrefDialogFragment() {
++    private val preferenceTag = "koReaderSyncPreference"
++
++    override fun onStart() {
++        super.onStart()
++        dialog?.window?.run {
++            setBackgroundDrawableResource(R.color.transparent)
++            setLayout(0.9f, ViewGroup.LayoutParams.WRAP_CONTENT)
++        }
++    }
++
++    override fun onCreateView(
++        inflater: LayoutInflater,
++        container: ViewGroup?,
++        savedInstanceState: Bundle?,
++    ): View {
++        val view = LinearLayout(requireContext())
++        view.setBackgroundColor(requireContext().backgroundColor)
++        view.id = R.id.tag1
++        container?.addView(view)
++        return view
++    }
++
++    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
++        super.onViewCreated(view, savedInstanceState)
++        var preferenceFragment = childFragmentManager.findFragmentByTag(preferenceTag)
++        if (preferenceFragment == null) preferenceFragment = KoReaderSyncPreferenceFragment()
++        childFragmentManager.beginTransaction()
++            .replace(view.id, preferenceFragment, preferenceTag)
++            .commit()
++    }
++
++    class KoReaderSyncPreferenceFragment : PreferenceFragment(),
++        SharedPreferences.OnSharedPreferenceChangeListener {
++
++        override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
++            addPreferencesFromResource(R.xml.pref_koreader_sync)
++            updateAllSummaries()
++        }
++
++        override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
++            super.onViewCreated(view, savedInstanceState)
++            listView.setEdgeEffectColor(primaryColor)
++        }
++
++        override fun onResume() {
++            super.onResume()
++            preferenceManager.sharedPreferences?.registerOnSharedPreferenceChangeListener(this)
++            updateAllSummaries()
++        }
++
++        override fun onPause() {
++            preferenceManager.sharedPreferences?.unregisterOnSharedPreferenceChangeListener(this)
++            super.onPause()
++        }
++
++        override fun onSharedPreferenceChanged(
++            sharedPreferences: SharedPreferences?,
++            key: String?,
++        ) {
++            updateAllSummaries()
++            if (key == PreferKey.koReaderSyncEnabled && AppKoReader.hasCredentials) {
++                if (AppConfig.koReaderSyncEnabled) pullProgress() else pushProgress()
++            }
++        }
++
++        override fun onPreferenceTreeClick(preference: Preference): Boolean {
++            return when (preference.key) {
++                PreferKey.koReaderPagesBeforeSync -> {
++                    NumberPickerDialog(requireContext())
++                        .setTitle(getString(R.string.koreader_pages_before_sync))
++                        .setMinValue(0)
++                        .setMaxValue(999)
++                        .setValue(AppConfig.koReaderPagesBeforeSync)
++                        .show { value ->
++                            preferenceManager.sharedPreferences?.edit()
++                                ?.putString(PreferKey.koReaderPagesBeforeSync, value.toString())
++                                ?.apply()
++                            updatePagesSummary()
++                        }
++                    true
++                }
++
++                "koreaderAccount" -> {
++                    startActivity(Intent(requireContext(), ConfigActivity::class.java).apply {
++                        putExtra("configTag", ConfigTag.BACKUP_CONFIG)
++                    })
++                    true
++                }
++
++                "koReaderPushNow" -> {
++                    pushProgress()
++                    true
++                }
++
++                "koReaderPullNow" -> {
++                    pullProgress()
++                    true
++                }
++
++                else -> super.onPreferenceTreeClick(preference)
++            }
++        }
++
++        private fun pushProgress() {
++            if (!requireCredentials()) return
++            val book = ReadBook.book?.takeIf { it.isLocal } ?: run {
++                requireContext().toastOnUi(R.string.koreader_sync_only_local)
++                return
++            }
++            lifecycleScope.launch {
++                try {
++                    withContext(IO) { AppKoReader.uploadBookProgress(book, interactive = true) }
++                    requireContext().toastOnUi(R.string.koreader_progress_pushed)
++                } catch (error: Throwable) {
++                    if (error is CancellationException) throw error
++                    AppLog.put("手动推送 KOReader 进度失败《${book.name}》", error)
++                    requireContext().toastOnUi(
++                        requireContext().getString(
++                            R.string.koreader_sync_failed,
++                            error.localizedMessage ?: "unknown",
++                        )
++                    )
++                }
++            }
++        }
++
++        private fun pullProgress() {
++            if (!requireCredentials()) return
++            val book = ReadBook.book?.takeIf { it.isLocal } ?: run {
++                requireContext().toastOnUi(R.string.koreader_sync_only_local)
++                return
++            }
++            lifecycleScope.launch {
++                try {
++                    val remote = withContext(IO) { AppKoReader.getBookProgress(book) }
++                    val progress = remote?.let { withContext(IO) { AppKoReader.toBookProgress(book, it) } }
++                    if (progress == null) {
++                        requireContext().toastOnUi(R.string.koreader_no_remote_progress)
++                        return@launch
++                    }
++                    if (ReadBook.setProgress(progress)) {
++                        requireContext().toastOnUi(R.string.koreader_progress_pulled)
++                    } else {
++                        requireContext().toastOnUi(R.string.koreader_progress_already_current)
++                    }
++                } catch (error: Throwable) {
++                    if (error is CancellationException) throw error
++                    AppLog.put("手动拉取 KOReader 进度失败《${book.name}》", error)
++                    requireContext().toastOnUi(
++                        requireContext().getString(
++                            R.string.koreader_sync_failed,
++                            error.localizedMessage ?: "unknown",
++                        )
++                    )
++                }
++            }
++        }
++
++        private fun requireCredentials(): Boolean {
++            if (AppKoReader.hasCredentials) return true
++            requireContext().toastOnUi(R.string.koreader_credentials_required)
++            return false
++        }
++
++        private fun updateAllSummaries() {
++            updatePagesSummary()
++            findPreference<Preference>("koreaderAccount")?.summary =
++                if (AppKoReader.hasCredentials) AppConfig.koReaderServer
++                else getString(R.string.koreader_account_summary)
++            listOf(PreferKey.koReaderSyncForward, PreferKey.koReaderSyncBackward,
++                PreferKey.koReaderMatchingMode).forEach { key ->
++                val preference = findPreference<ListPreference>(key) ?: return@forEach
++                val index = preference.findIndexOfValue(preference.value)
++                if (index >= 0) preference.summary = preference.entries[index]
++            }
++            findPreference<SwitchPreference>(PreferKey.koReaderSyncEnabled)?.summary = getString(
++                if (AppConfig.koReaderSyncEnabled) R.string.koreader_auto_sync_on
++                else R.string.koreader_auto_sync_off
++            )
++        }
++
++        private fun updatePagesSummary() {
++            val pages = AppConfig.koReaderPagesBeforeSync
++            findPreference<Preference>(PreferKey.koReaderPagesBeforeSync)?.summary = getString(
++                if (pages > 0) R.string.koreader_pages_before_sync_summary
++                else R.string.koreader_pages_before_sync_disabled,
++                pages,
++            )
++        }
++    }
++}
+diff --git a/app/src/main/java/io/legado/app/ui/config/BackupConfigFragment.kt b/app/src/main/java/io/legado/app/ui/config/BackupConfigFragment.kt
+index a035595c1..503e94c9b 100644
+--- a/app/src/main/java/io/legado/app/ui/config/BackupConfigFragment.kt
++++ b/app/src/main/java/io/legado/app/ui/config/BackupConfigFragment.kt
+@@ -30,6 +30,7 @@ import io.legado.app.help.AppWebDav
+ import io.legado.app.help.config.AppConfig
+ import io.legado.app.help.config.LocalConfig
+ import io.legado.app.help.coroutine.Coroutine
++import io.legado.app.help.koReader.AppKoReader
+ import io.legado.app.help.storage.Backup
+ import io.legado.app.help.storage.BackupConfig
+ import io.legado.app.help.storage.ImportOldData
+@@ -55,6 +56,7 @@ import io.legado.app.utils.externalFiles
+ import io.legado.app.utils.getPrefString
+ import io.legado.app.utils.isContentScheme
+ import io.legado.app.utils.launch
++import io.legado.app.utils.putPrefString
+ import io.legado.app.utils.setEdgeEffectColor
+ import io.legado.app.utils.showDialogFragment
+ import io.legado.app.utils.showHelp
+@@ -137,6 +139,19 @@ class BackupConfigFragment : PreferenceFragment(),
+                 editText.setSelection(editText.text.length)
+             }
+         }
++        findPreference<EditTextPreference>(PreferKey.koReaderPassword)?.let {
++            it.setOnBindEditTextListener { editText ->
++                editText.inputType =
++                    InputType.TYPE_TEXT_VARIATION_PASSWORD or InputType.TYPE_CLASS_TEXT
++                editText.setSelection(editText.text.length)
++            }
++        }
++        findPreference<EditTextPreference>(PreferKey.koReaderDeviceName)?.let {
++            it.setOnBindEditTextListener { editText ->
++                editText.text = AppConfig.koReaderDeviceName.toEditable()
++                editText.setSelection(editText.text.length)
++            }
++        }
+         findPreference<EditTextPreference>(PreferKey.webDavDir)?.let {
+             it.setOnBindEditTextListener { editText ->
+                 editText.text = AppConfig.webDavDir?.toEditable()
+@@ -154,6 +169,11 @@ class BackupConfigFragment : PreferenceFragment(),
+         upPreferenceSummary(PreferKey.webDavPassword, getPrefString(PreferKey.webDavPassword))
+         upPreferenceSummary(PreferKey.webDavDir, AppConfig.webDavDir)
+         upPreferenceSummary(PreferKey.webDavDeviceName, AppConfig.webDavDeviceName)
++        upPreferenceSummary(PreferKey.koReaderServer, AppConfig.koReaderServer)
++        upPreferenceSummary(PreferKey.koReaderUsername, AppConfig.koReaderUsername)
++        upPreferenceSummary(PreferKey.koReaderPassword, AppConfig.koReaderPassword)
++        upPreferenceSummary(PreferKey.koReaderDeviceName, AppConfig.koReaderDeviceName)
++        upPreferenceSummary(PreferKey.koReaderMatchingMode, AppConfig.koReaderMatchingMode)
+         upPreferenceSummary(PreferKey.backupPath, getPrefString(PreferKey.backupPath))
+         updateAutoBackupSummary()
+         findPreference<io.legado.app.lib.prefs.Preference>("web_dav_restore")
+@@ -218,6 +238,12 @@ class BackupConfigFragment : PreferenceFragment(),
+                 viewModel.upWebDavConfig()
+             }
+ 
++            PreferKey.koReaderServer,
++            PreferKey.koReaderUsername,
++            PreferKey.koReaderPassword,
++            PreferKey.koReaderDeviceName,
++            PreferKey.koReaderMatchingMode -> upPreferenceSummary(key, appCtx.getPrefString(key))
++
+             PreferKey.webDavDeviceName -> upPreferenceSummary(key, getPrefString(key))
+         }
+     }
+@@ -254,6 +280,18 @@ class BackupConfigFragment : PreferenceFragment(),
+                 else -> value
+             }
+ 
++            PreferKey.koReaderPassword ->
++                preference.summary = if (value.isNullOrEmpty()) {
++                    getString(R.string.koreader_password_s)
++                } else {
++                    "*".repeat(value.length)
++                }
++
++            PreferKey.koReaderServer,
++            PreferKey.koReaderUsername,
++            PreferKey.koReaderDeviceName -> preference.summary =
++                value?.takeIf { it.isNotBlank() } ?: preference.summary
++
+             else -> {
+                 if (preference is ListPreference) {
+                     val index = preference.findIndexOfValue(value)
+@@ -276,10 +314,34 @@ class BackupConfigFragment : PreferenceFragment(),
+             PreferKey.autoBackup -> configureAutoBackup()
+             "web_dav_restore" -> restore()
+             "lan_backup_transfer" -> lanBackupTransfer()
++            PreferKey.koReaderTestAuth -> testKoReaderAuthentication()
+         }
+         return super.onPreferenceTreeClick(preference)
+     }
+ 
++    private fun testKoReaderAuthentication() {
++        val normalizedServer = AppKoReader.normalizedServerUrl
++        if (normalizedServer != getPrefString(PreferKey.koReaderServer)) {
++            appCtx.putPrefString(PreferKey.koReaderServer, normalizedServer)
++            upPreferenceSummary(PreferKey.koReaderServer, normalizedServer)
++        }
++        waitDialog.setText(R.string.koreader_test_auth)
++        waitDialog.show()
++        viewLifecycleOwner.lifecycleScope.launch {
++            try {
++                AppKoReader.verifyAuthentication()
++                appCtx.toastOnUi(R.string.koreader_auth_success)
++            } catch (error: Throwable) {
++                AppLog.put("KOReader 账号验证失败\n${error.localizedMessage}", error)
++                appCtx.toastOnUi(
++                    getString(R.string.koreader_sync_failed, error.localizedMessage ?: "unknown")
++                )
++            } finally {
++                waitDialog.dismiss()
++            }
++        }
++    }
++
+     private fun defaultBackupPathSummary() =
+         "${getString(R.string.default_path)}\n${requireContext().externalFiles.absolutePath}"
+ 
+diff --git a/app/src/main/res/layout/item_book_group_manage.xml b/app/src/main/res/layout/item_book_group_manage.xml
+index c48e13e67..27145ac8e 100644
+--- a/app/src/main/res/layout/item_book_group_manage.xml
++++ b/app/src/main/res/layout/item_book_group_manage.xml
+@@ -25,6 +25,15 @@
+         android:text="@string/edit"
+         android:textColor="@color/secondaryText" />
+ 
++    <TextView
++        android:id="@+id/tv_del"
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:background="?attr/selectableItemBackground"
++        android:padding="8dp"
++        android:text="@string/delete"
++        android:textColor="@color/secondaryText" />
++
+     <io.legado.app.lib.theme.view.ThemeSwitch
+         android:id="@+id/sw_show"
+         android:minWidth="48dp"
+@@ -32,4 +41,4 @@
+         android:layout_width="wrap_content"
+         android:layout_height="wrap_content" />
+ 
+-</LinearLayout>
+\ No newline at end of file
++</LinearLayout>
+diff --git a/app/src/main/res/menu/book_read.xml b/app/src/main/res/menu/book_read.xml
+index ed31a0db2..4d57b99e8 100644
+--- a/app/src/main/res/menu/book_read.xml
++++ b/app/src/main/res/menu/book_read.xml
+@@ -70,6 +70,12 @@
+         android:visible="false"
+         app:showAsAction="never" />
+ 
++    <item
++        android:id="@+id/menu_koreader_sync"
++        android:title="@string/koreader_sync"
++        android:visible="false"
++        app:showAsAction="never" />
++
+     <item
+         android:id="@+id/menu_cover_progress"
+         android:title="@string/cover_book_progress"
+diff --git a/app/src/main/res/values-zh/strings.xml b/app/src/main/res/values-zh/strings.xml
+index 92e99abed..b70e51faa 100644
+--- a/app/src/main/res/values-zh/strings.xml
++++ b/app/src/main/res/values-zh/strings.xml
+@@ -764,6 +764,7 @@
+     <string name="text_color">文字颜色</string>
+     <string name="select_image">选择图片</string>
+     <string name="group_manage">分组管理</string>
++    <string name="book_group_delete_message">删除该分组？分组内的书籍会保留在书架，并移至未分组。</string>
+     <string name="group_select">分组选择</string>
+     <string name="group_edit">编辑分组</string>
+     <string name="move_to_group">移入分组</string>
+@@ -1476,6 +1477,61 @@
+     <string name="open_book_info_by_click_title">点击书名打开详情</string>
+     <string name="export_wait">等待导出</string>
+     <string name="sync_book_progress_success">进度同步成功</string>
++    <string name="koreader_sync">KOReader 同步</string>
++    <string name="koreader_sync_enabled_t">启用 KOReader 同步</string>
++    <string name="koreader_sync_enabled_s">使用与 KOReader 相同的 KOSync 账号。打开本地书籍时拉取，退出阅读时推送。</string>
++    <string name="koreader_server">KOSync 服务器</string>
++    <string name="koreader_server_s">默认：https://kosync.nickthesick.com</string>
++    <string name="koreader_username">KOReader 用户名</string>
++    <string name="koreader_username_s">用于 KOReader 进度同步的用户名</string>
++    <string name="koreader_password">KOReader 密码</string>
++    <string name="koreader_password_s">用于 KOReader 进度同步的密码</string>
++    <string name="koreader_device">同步设备名称</string>
++    <string name="koreader_device_s">在 KOReader 中显示的设备名称</string>
++    <string name="koreader_matching">文档匹配方式</string>
++    <string name="koreader_matching_s">二进制模式要求两端打开完全相同的本地书籍文件。</string>
++    <string name="koreader_matching_binary">文件二进制（推荐）</string>
++    <string name="koreader_matching_filename">文件名</string>
++    <string name="koreader_pull_on_open">打开时拉取</string>
++    <string name="koreader_pull_on_open_s">进入阅读界面时恢复最新的 KOSync 进度</string>
++    <string name="koreader_push_on_exit">退出时推送</string>
++    <string name="koreader_push_on_exit_s">退出阅读界面时将当前进度发送到 KOSync</string>
++    <string name="koreader_test_auth">验证 KOReader 账号</string>
++    <string name="koreader_test_auth_s">检查服务器、用户名和密码</string>
++    <string name="koreader_auth_success">KOReader 账号验证成功</string>
++    <string name="koreader_sync_only_local">KOReader 同步目前需要本地书籍文件</string>
++    <string name="koreader_sync_failed">KOReader 同步失败：%1$s</string>
++    <string name="koreader_auto_sync">自动同步文档</string>
++    <string name="koreader_auto_sync_summary">打开时拉取较新进度，退出时上传，并支持按页数触发同步。</string>
++    <string name="koreader_auto_sync_on">已启用。较新和较旧进度将按下方“同步行为”处理。</string>
++    <string name="koreader_auto_sync_off">已关闭。仍可使用立即上传和立即拉取。</string>
++    <string name="koreader_account">账号与服务器</string>
++    <string name="koreader_account_summary">配置 KOSync 服务器、用户名和密码</string>
++    <string name="koreader_pages_before_sync">触发同步的页数</string>
++    <string name="koreader_pages_before_sync_summary">每 %1$d 页触发，空闲 10 秒后上传（0 表示关闭）</string>
++    <string name="koreader_pages_before_sync_disabled">已关闭按页数触发同步</string>
++    <string name="koreader_sync_forward">同步到较新状态</string>
++    <string name="koreader_sync_forward_summary">其他设备的阅读进度较新时执行</string>
++    <string name="koreader_sync_backward">同步到较旧状态</string>
++    <string name="koreader_sync_backward_summary">其他设备的阅读进度较旧时执行</string>
++    <string name="koreader_sync_strategy_silent">静默</string>
++    <string name="koreader_sync_strategy_prompt">提示</string>
++    <string name="koreader_sync_strategy_disable">不同步</string>
++    <string name="koreader_push_now">立即上传本设备的进度</string>
++    <string name="koreader_pull_now">立即从其他设备拉取进度</string>
++    <string name="koreader_matching_summary_short">二进制要求文件完全相同；文件名按同名文件匹配</string>
++    <string name="koreader_send_metadata">发送文档元数据</string>
++    <string name="koreader_send_metadata_summary">上传进度时附带文件名、书名和作者。官方服务器会忽略这些数据，自建服务器可以使用。</string>
++    <string name="koreader_credentials_required">请先配置 KOSync 服务器、用户名和密码</string>
++    <string name="koreader_no_remote_progress">未找到该文档的云端进度</string>
++    <string name="koreader_progress_pushed">已上传 KOReader 阅读进度</string>
++    <string name="koreader_progress_pulled">已拉取 KOReader 阅读进度</string>
++    <string name="koreader_progress_already_current">云端进度已经对应当前本地位置</string>
++    <string name="koreader_prompt_newer">较新</string>
++    <string name="koreader_prompt_older">较旧</string>
++    <string name="koreader_unknown_device">其他设备</string>
++    <string name="koreader_progress_percentage">%1$.1f%%</string>
++    <string name="koreader_prompt_message">本机位置：%1$s\n其他设备位置：%2$s（%3$s，来自“%4$s”）\n目标章节：%5$s\n\n是否使用其他设备的进度？</string>
+     <string name="default_home_page">默认主页</string>
+     <string name="show_bookshelf_fast_scroller">显示快速滚动条</string>
+     <string name="export_all_use_book_source">导出所有书的书源</string>
+diff --git a/app/src/main/res/values/arrays.xml b/app/src/main/res/values/arrays.xml
+index 8d720d1bd..64e551b49 100644
+--- a/app/src/main/res/values/arrays.xml
++++ b/app/src/main/res/values/arrays.xml
+@@ -38,6 +38,25 @@
+ 		<item>@string/read_progress_enhanced</item>
+ 	</string-array>
+ 
++    <string-array name="koreader_matching_title">
++        <item>@string/koreader_matching_binary</item>
++        <item>@string/koreader_matching_filename</item>
++    </string-array>
++    <string-array name="koreader_matching_value">
++        <item>binary</item>
++        <item>filename</item>
++    </string-array>
++    <string-array name="koreader_sync_strategy_title">
++        <item>@string/koreader_sync_strategy_silent</item>
++        <item>@string/koreader_sync_strategy_prompt</item>
++        <item>@string/koreader_sync_strategy_disable</item>
++    </string-array>
++    <string-array name="koreader_sync_strategy_value">
++        <item>silent</item>
++        <item>prompt</item>
++        <item>disable</item>
++    </string-array>
++
+ 	<string-array name="book_sort">
+ 		<item>@string/text_default</item>
+ 		<item>@string/bookshelf_px_0</item>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 5cfb89677..4244748eb 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -767,6 +767,7 @@
+     <string name="text_accent_color">强调颜色</string>
+     <string name="select_image">Select a picture</string>
+     <string name="group_manage">Group management</string>
++    <string name="book_group_delete_message">Delete this group? Its books will remain on the bookshelf and become ungrouped.</string>
+     <string name="group_select">Group selection</string>
+     <string name="group_edit">Group editing</string>
+     <string name="move_to_group">Move to group</string>
+@@ -1068,6 +1069,61 @@
+     <string name="sync_book_progress_plus_t">Sync Enhancement</string>
+     <string name="sync_book_progress_plus_s">Sync cloud progress when re-entering the page (screen off, returning from background, etc.) or when the network becomes available. You will be prompted before syncing new progress.</string>
+     <string name="sync_book_progress_success">Sync progress success</string>
++    <string name="koreader_auto_sync">Automatically keep documents in sync</string>
++    <string name="koreader_auto_sync_summary">Pull newer progress when opening, push on exit, and support page-triggered sync.</string>
++    <string name="koreader_auto_sync_on">Enabled. New and old remote progress follows the sync behavior below.</string>
++    <string name="koreader_auto_sync_off">Disabled. Manual push and pull remain available.</string>
++    <string name="koreader_account">Account and server</string>
++    <string name="koreader_account_summary">Configure the KOSync server, username, and password</string>
++    <string name="koreader_pages_before_sync">Number of pages before update</string>
++    <string name="koreader_pages_before_sync_summary">Every %1$d pages; upload after 10 seconds idle (0 disables)</string>
++    <string name="koreader_pages_before_sync_disabled">Page-triggered sync is disabled</string>
++    <string name="koreader_sync_forward">Sync to a newer state</string>
++    <string name="koreader_sync_forward_summary">Applies when another device has newer progress</string>
++    <string name="koreader_sync_backward">Sync to an older state</string>
++    <string name="koreader_sync_backward_summary">Applies when another device has older progress</string>
++    <string name="koreader_sync_strategy_silent">Silently</string>
++    <string name="koreader_sync_strategy_prompt">Prompt</string>
++    <string name="koreader_sync_strategy_disable">Never</string>
++    <string name="koreader_push_now">Push progress from this device now</string>
++    <string name="koreader_pull_now">Pull progress from other devices now</string>
++    <string name="koreader_matching_summary_short">Binary requires identical files; filename matches files with the same name</string>
++    <string name="koreader_send_metadata">Send document metadata</string>
++    <string name="koreader_send_metadata_summary">Send filename, title, and authors with progress uploads. The official server ignores this data and custom servers may use it.</string>
++    <string name="koreader_credentials_required">Configure the KOSync server, username, and password first</string>
++    <string name="koreader_no_remote_progress">No progress was found for this document</string>
++    <string name="koreader_progress_pushed">KOReader progress pushed</string>
++    <string name="koreader_progress_pulled">KOReader progress pulled</string>
++    <string name="koreader_progress_already_current">The cloud progress already matches this device</string>
++    <string name="koreader_prompt_newer">newer</string>
++    <string name="koreader_prompt_older">older</string>
++    <string name="koreader_unknown_device">another device</string>
++    <string name="koreader_progress_percentage">%1$.1f%%</string>
++    <string name="koreader_prompt_message">This device: %1$s\nOther device: %2$s (%3$s, from “%4$s”)\nTarget chapter: %5$s\n\nUse the progress from the other device?</string>
++    <string name="koreader_sync">KOReader sync (KOSync)</string>
++    <string name="koreader_sync_enabled_t">Enable KOReader sync</string>
++    <string name="koreader_sync_enabled_s">Use the same KOSync account as KOReader. Pull when opening a local book and push when leaving it.</string>
++    <string name="koreader_server">KOSync server</string>
++    <string name="koreader_server_s">Default: https://kosync.nickthesick.com</string>
++    <string name="koreader_username">KOReader username</string>
++    <string name="koreader_username_s">The username used for KOReader progress sync</string>
++    <string name="koreader_password">KOReader password</string>
++    <string name="koreader_password_s">The password used for KOReader progress sync</string>
++    <string name="koreader_device">Sync device name</string>
++    <string name="koreader_device_s">Device name shown by KOReader</string>
++    <string name="koreader_matching">Document matching</string>
++    <string name="koreader_matching_s">Binary mode requires both readers to open the exact same local book file.</string>
++    <string name="koreader_matching_binary">Binary file (recommended)</string>
++    <string name="koreader_matching_filename">File name</string>
++    <string name="koreader_pull_on_open">Pull when opening</string>
++    <string name="koreader_pull_on_open_s">Restore the latest KOSync progress when entering the reader</string>
++    <string name="koreader_push_on_exit">Push when leaving</string>
++    <string name="koreader_push_on_exit_s">Send the current progress to KOSync when leaving the reader</string>
++    <string name="koreader_test_auth">Verify KOReader account</string>
++    <string name="koreader_test_auth_s">Check the server, username, and password</string>
++    <string name="koreader_auth_success">KOReader account verified</string>
++    <string name="koreader_sync_only_local">KOReader sync currently requires a local book file</string>
++    <string name="koreader_sync_failed">KOReader sync failed: %1$s</string>
+     <string name="create_bookmark_error">Failed to create bookmark</string>
+     <string name="single_url">Single URL</string>
+     <string name="export_bookshelf">Export the list of books</string>
+diff --git a/app/src/main/res/xml/pref_config_backup.xml b/app/src/main/res/xml/pref_config_backup.xml
+index 23188dd7f..f46a993b3 100644
+--- a/app/src/main/res/xml/pref_config_backup.xml
++++ b/app/src/main/res/xml/pref_config_backup.xml
+@@ -2,6 +2,45 @@
+ <androidx.preference.PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:app="http://schemas.android.com/apk/res-auto">
+ 
++    <io.legado.app.lib.prefs.PreferenceCategory
++        android:title="@string/koreader_sync"
++        app:allowDividerAbove="false"
++        app:allowDividerBelow="false"
++        app:iconSpaceReserved="false"
++        app:layout="@layout/view_preference_category">
++
++        <io.legado.app.lib.prefs.EditTextPreference
++            android:key="koReaderServer"
++            android:summary="@string/koreader_server_s"
++            android:title="@string/koreader_server"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.EditTextPreference
++            android:key="koReaderUsername"
++            android:summary="@string/koreader_username_s"
++            android:title="@string/koreader_username"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.EditTextPreference
++            android:key="koReaderPassword"
++            android:summary="@string/koreader_password_s"
++            android:title="@string/koreader_password"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.EditTextPreference
++            android:key="koReaderDeviceName"
++            android:summary="@string/koreader_device_s"
++            android:title="@string/koreader_device"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.Preference
++            android:key="koReaderTestAuth"
++            android:summary="@string/koreader_test_auth_s"
++            android:title="@string/koreader_test_auth"
++            app:iconSpaceReserved="false" />
++
++    </io.legado.app.lib.prefs.PreferenceCategory>
++
+     <io.legado.app.lib.prefs.PreferenceCategory
+         android:title="@string/web_dav_set"
+         app:allowDividerAbove="false"
+diff --git a/app/src/main/res/xml/pref_koreader_sync.xml b/app/src/main/res/xml/pref_koreader_sync.xml
+new file mode 100644
+index 000000000..3084f160c
+--- /dev/null
++++ b/app/src/main/res/xml/pref_koreader_sync.xml
+@@ -0,0 +1,76 @@
++<?xml version="1.0" encoding="utf-8"?>
++<androidx.preference.PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto">
++
++    <io.legado.app.lib.prefs.PreferenceCategory
++        android:title="@string/koreader_sync"
++        app:allowDividerAbove="false"
++        app:allowDividerBelow="false"
++        app:iconSpaceReserved="false">
++
++        <io.legado.app.lib.prefs.SwitchPreference
++            android:defaultValue="false"
++            android:key="koReaderSyncEnabled"
++            android:summary="@string/koreader_auto_sync_summary"
++            android:title="@string/koreader_auto_sync"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.Preference
++            android:key="koreaderAccount"
++            android:summary="@string/koreader_account_summary"
++            android:title="@string/koreader_account"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.Preference
++            android:dependency="koReaderSyncEnabled"
++            android:key="koReaderPagesBeforeSync"
++            android:title="@string/koreader_pages_before_sync"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.NameListPreference
++            android:defaultValue="prompt"
++            android:entries="@array/koreader_sync_strategy_title"
++            android:entryValues="@array/koreader_sync_strategy_value"
++            android:key="koReaderSyncForward"
++            android:summary="@string/koreader_sync_forward_summary"
++            android:title="@string/koreader_sync_forward"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.NameListPreference
++            android:defaultValue="disable"
++            android:entries="@array/koreader_sync_strategy_title"
++            android:entryValues="@array/koreader_sync_strategy_value"
++            android:key="koReaderSyncBackward"
++            android:summary="@string/koreader_sync_backward_summary"
++            android:title="@string/koreader_sync_backward"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.Preference
++            android:key="koReaderPushNow"
++            android:title="@string/koreader_push_now"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.Preference
++            android:key="koReaderPullNow"
++            android:title="@string/koreader_pull_now"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.NameListPreference
++            android:defaultValue="binary"
++            android:entries="@array/koreader_matching_title"
++            android:entryValues="@array/koreader_matching_value"
++            android:key="koReaderMatchingMode"
++            android:summary="@string/koreader_matching_summary_short"
++            android:title="@string/koreader_matching"
++            app:iconSpaceReserved="false" />
++
++        <io.legado.app.lib.prefs.SwitchPreference
++            android:defaultValue="false"
++            android:key="koReaderSendMetadata"
++            android:summary="@string/koreader_send_metadata_summary"
++            android:title="@string/koreader_send_metadata"
++            app:iconSpaceReserved="false" />
++
++    </io.legado.app.lib.prefs.PreferenceCategory>
++
++</androidx.preference.PreferenceScreen>
+diff --git a/app/src/test/java/io/legado/app/help/koReader/KoReaderProgressMapperTest.kt b/app/src/test/java/io/legado/app/help/koReader/KoReaderProgressMapperTest.kt
+new file mode 100644
+index 000000000..23b7bb1dc
+--- /dev/null
++++ b/app/src/test/java/io/legado/app/help/koReader/KoReaderProgressMapperTest.kt
+@@ -0,0 +1,277 @@
++package io.legado.app.help.koReader
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class KoReaderProgressMapperTest {
++
++    @Test
++    fun normalizesKoReaderServerAddresses() {
++        assertEquals(
++            "https://kosync.nickthesick.com",
++            KoReaderDefaults.SERVER_URL,
++        )
++        assertEquals(
++            "https://kosync.example.com",
++            KoReaderProgressMapper.normalizeServerUrl("kosync.example.com", KoReaderDefaults.SERVER_URL),
++        )
++        assertEquals(
++            "https://kosync.nickthesick.com",
++            KoReaderProgressMapper.normalizeServerUrl("https://kosync.nickthesick.com/", "https://default.example"),
++        )
++        assertEquals(
++            "https://kosync.nickthesick.com",
++            KoReaderProgressMapper.normalizeServerUrl("", KoReaderDefaults.SERVER_URL),
++        )
++    }
++
++    @Test
++    fun acceptsFractionAndPercentageCloudValues() {
++        assertEquals(
++            0.68,
++            KoReaderProgressMapper.normalizePercentage(0.68) ?: Double.NaN,
++            0.0,
++        )
++        assertEquals(
++            0.68,
++            KoReaderProgressMapper.normalizePercentage(68.0) ?: Double.NaN,
++            0.0,
++        )
++        assertEquals(
++            0.1234,
++            KoReaderProgressMapper.normalizePercentage(0.123456) ?: Double.NaN,
++            0.0,
++        )
++        assertEquals(
++            1.0,
++            KoReaderProgressMapper.normalizePercentage(100.0) ?: Double.NaN,
++            0.0,
++        )
++        assertEquals(
++            0.0,
++            KoReaderProgressMapper.normalizePercentage(-1.0) ?: Double.NaN,
++            0.0,
++        )
++        assertNull(KoReaderProgressMapper.normalizePercentage(Double.NaN))
++    }
++
++    @Test
++    fun partialMd5MatchesKOReaderSamplingAlgorithm() {
++        val data = ByteArray(20_000) { index ->
++            (index * 31 + index / 97).toByte()
++        }
++        assertEquals(
++            "7460566a1c8997f679793899a6697d35",
++            KoReaderProgressMapper.partialMd5(data.inputStream()),
++        )
++    }
++
++    @Test
++    fun mapsPercentageToChapterAndPosition() {
++        val lengths = listOf(100, 100)
++        assertEquals(0 to 50, KoReaderProgressMapper.mapPercentage(0.25, lengths))
++        assertEquals(1 to 0, KoReaderProgressMapper.mapPercentage(0.5, lengths))
++        assertEquals(1 to 50, KoReaderProgressMapper.mapPercentage(0.75, lengths))
++        assertEquals(1 to 100, KoReaderProgressMapper.mapPercentage(1.0, lengths))
++        assertNull(KoReaderProgressMapper.mapPercentage(0.5, emptyList()))
++    }
++
++    @Test
++    fun weightsProgressByChapterLength() {
++        val lengths = listOf(100, 300)
++        assertEquals(
++            0.625,
++            KoReaderProgressMapper.percentage(1, 150, lengths),
++            0.0,
++        )
++        assertEquals(0 to 50, KoReaderProgressMapper.mapPercentage(0.125, lengths))
++        assertEquals(1 to 150, KoReaderProgressMapper.mapPercentage(0.625, lengths))
++    }
++
++    @Test
++    fun createsLegadoPercentageFromChapterPosition() {
++        assertEquals(
++            0.25,
++            KoReaderProgressMapper.percentage(0, 50, listOf(100, 100)),
++            0.0,
++        )
++        assertEquals(
++            1.0,
++            KoReaderProgressMapper.percentage(1, 100, listOf(100, 100)),
++            0.0,
++        )
++        assertEquals(
++            0.75,
++            KoReaderProgressMapper.percentage(
++                chapterIndex = 1,
++                chapterPosition = 0,
++                chapterLengths = listOf(100, 100),
++                chapterFractionOverride = 0.5,
++            ),
++            0.0,
++        )
++    }
++
++    @Test
++    fun parsesEpubXPointerFragment() {
++        assertEquals(
++            7,
++            KoReaderProgressMapper.parseEpubFragmentNumber("/body/DocFragment[7]/body/p[2].12"),
++        )
++        assertEquals(7, KoReaderProgressMapper.parseEpubFragmentNumber("/body/DocFragment[7]"))
++        assertNull(KoReaderProgressMapper.parseEpubFragmentNumber("12"))
++    }
++
++    @Test
++    fun parsesEpubXPointerNodeAndCharacterOffset() {
++        val pointer = KoReaderProgressMapper.parseEpubXPointer(
++            "/body/DocFragment[23]/body/div[2]/p[4]/text().12"
++        )
++        assertEquals(23, pointer?.fragmentOrdinal)
++        assertEquals("body/div[2]/p[4]/text()", pointer?.nodePath)
++        assertEquals(12, pointer?.characterOffset)
++
++        val elementPointer = KoReaderProgressMapper.parseEpubXPointer(
++            "/body/DocFragment[3]/body/div/p[2]"
++        )
++        assertEquals("body/div/p[2]", elementPointer?.nodePath)
++        assertEquals(0, elementPointer?.characterOffset)
++        assertNull(KoReaderProgressMapper.parseEpubXPointer("/body/div/p[2]/text().1"))
++    }
++
++    @Test
++    fun formatsChapterAnchorAsEpubXPointer() {
++        assertEquals(
++            "/body/DocFragment[7]/body/div[3]/h2",
++            KoReaderProgressMapper.formatEpubElementXPointer(7, "/body/div[3]/h2"),
++        )
++        assertNull(KoReaderProgressMapper.formatEpubElementXPointer(0, "body/div"))
++        assertNull(KoReaderProgressMapper.formatEpubElementXPointer(7, ""))
++    }
++
++    @Test
++    fun formatsTextNodeAsEpubXPointer() {
++        assertEquals(
++            "/body/DocFragment[7]/body/div[3]/p[2]/text().12",
++            KoReaderProgressMapper.formatEpubTextXPointer(
++                fragmentOrdinal = 7,
++                nodePath = "body/div[3]/p[2]/text()",
++                characterOffset = 12,
++            ),
++        )
++        assertNull(KoReaderProgressMapper.formatEpubTextXPointer(7, "body/p", -1))
++    }
++
++    @Test
++    fun treatsTimestampAsAuthoritativeWhenRemotePositionIsAhead() {
++        assertFalse(
++            KoReaderProgressMapper.isRemoteNewer(
++                localPercentage = 0.25,
++                localTimestampSeconds = 2_000,
++                remotePercentage = 0.5,
++                remoteTimestampSeconds = 1_999.0,
++                percentageEpsilon = 0.0001,
++            )
++        )
++    }
++
++    @Test
++    fun acceptsNewerRemoteTimestampForEarlierRereadPosition() {
++        assertTrue(
++            KoReaderProgressMapper.isRemoteNewer(
++                localPercentage = 0.6,
++                localTimestampSeconds = 2_000,
++                remotePercentage = 0.3,
++                remoteTimestampSeconds = 2_001.0,
++                percentageEpsilon = 0.0001,
++            )
++        )
++    }
++
++    @Test
++    fun rejectsOlderRemotePositionEvenWhenPercentageDiffers() {
++        assertFalse(
++            KoReaderProgressMapper.isRemoteNewer(
++                localPercentage = 0.6,
++                localTimestampSeconds = 3_000,
++                remotePercentage = 0.3,
++                remoteTimestampSeconds = 2_000.0,
++                percentageEpsilon = 0.0001,
++            )
++        )
++    }
++
++    @Test
++    fun usesPositionOnlyWhenLegacyServerOmitsTimestamp() {
++        assertTrue(
++            KoReaderProgressMapper.isRemoteNewer(
++                localPercentage = 0.3,
++                localTimestampSeconds = 3_000,
++                remotePercentage = 0.4,
++                remoteTimestampSeconds = null,
++                percentageEpsilon = 0.0001,
++            )
++        )
++        assertFalse(
++            KoReaderProgressMapper.isRemoteNewer(
++                localPercentage = 0.4,
++                localTimestampSeconds = 3_000,
++                remotePercentage = 0.3,
++                remoteTimestampSeconds = null,
++                percentageEpsilon = 0.0001,
++            )
++        )
++    }
++
++    @Test
++    fun choosesForwardAndBackwardStrategiesFromTimestamp() {
++        val newer = KoReaderSyncPolicy.decide(
++            localPercentage = 0.5,
++            localTimestampSeconds = 2_000,
++            remotePercentage = 0.4,
++            remoteTimestampSeconds = 2_001.0,
++            forwardStrategy = "silent",
++            backwardStrategy = "prompt",
++        )
++        assertEquals(KoReaderSyncStrategy.SILENT, newer?.strategy)
++        assertTrue(newer?.remoteIsNewer == true)
++
++        val older = KoReaderSyncPolicy.decide(
++            localPercentage = 0.5,
++            localTimestampSeconds = 2_000,
++            remotePercentage = 0.6,
++            remoteTimestampSeconds = 1_999.0,
++            forwardStrategy = "silent",
++            backwardStrategy = "prompt",
++        )
++        assertEquals(KoReaderSyncStrategy.PROMPT, older?.strategy)
++        assertFalse(older?.remoteIsNewer ?: true)
++    }
++
++    @Test
++    fun skipsUnchangedAndDisabledAutoSyncStates() {
++        assertNull(
++            KoReaderSyncPolicy.decide(
++                localPercentage = 0.5,
++                localTimestampSeconds = 2_000,
++                remotePercentage = 0.5,
++                remoteTimestampSeconds = 2_001.0,
++                forwardStrategy = "silent",
++                backwardStrategy = "prompt",
++            )
++        )
++        assertNull(
++            KoReaderSyncPolicy.decide(
++                localPercentage = 0.5,
++                localTimestampSeconds = 2_000,
++                remotePercentage = 0.4,
++                remoteTimestampSeconds = 2_001.0,
++                forwardStrategy = "disable",
++                backwardStrategy = "prompt",
++            )
++        )
++    }
++}
+diff --git a/app/src/test/java/io/legado/app/help/koReader/KoReaderSyncQueueTest.kt b/app/src/test/java/io/legado/app/help/koReader/KoReaderSyncQueueTest.kt
+new file mode 100644
+index 000000000..3ee4533a2
+--- /dev/null
++++ b/app/src/test/java/io/legado/app/help/koReader/KoReaderSyncQueueTest.kt
+@@ -0,0 +1,73 @@
++package io.legado.app.help.koReader
++
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class KoReaderSyncQueueTest {
++
++    @Test
++    fun deduplicatesSameDocumentOnSameUtcDay() {
++        val first = item(progress = "10", account = "account")
++        val second = item(progress = "20", account = "account")
++
++        val firstRaw = KoReaderSyncQueue.enqueue(null, first, nowSeconds = 100_000)
++        val secondRaw = KoReaderSyncQueue.enqueue(firstRaw, second, nowSeconds = 100_100)
++        val queue = KoReaderSyncQueue.decode(secondRaw)
++
++        assertEquals(1, queue.size)
++        assertEquals("20", queue.single().progress)
++    }
++
++    @Test
++    fun keepsDifferentDocumentsAndAccounts() {
++        val first = item(document = "one", account = "account")
++        val second = item(document = "two", account = "account")
++        val third = item(document = "one", account = "other")
++
++        var raw = KoReaderSyncQueue.enqueue(null, first, nowSeconds = 100_000)
++        raw = KoReaderSyncQueue.enqueue(raw, second, nowSeconds = 100_100)
++        raw = KoReaderSyncQueue.enqueue(raw, third, nowSeconds = 100_200)
++
++        assertEquals(3, KoReaderSyncQueue.decode(raw).size)
++    }
++
++    @Test
++    fun expiresEntriesOlderThanFourWeeks() {
++        val old = item(document = "old")
++        val current = item(document = "current")
++        val now = 10_000 + KoReaderSyncQueue.MAX_AGE_SECONDS + 1
++        var raw = KoReaderSyncQueue.enqueue(null, old, nowSeconds = 10_000)
++        raw = KoReaderSyncQueue.enqueue(raw, current, nowSeconds = now)
++
++        assertEquals("current", KoReaderSyncQueue.decode(raw).single().document)
++    }
++
++    @Test
++    fun protectsAgainstRunawayQueueGrowth() {
++        var raw: String? = null
++        repeat(KoReaderSyncQueue.MAX_ENTRIES + 5) { index ->
++            raw = KoReaderSyncQueue.enqueue(
++                raw,
++                item(document = "document-$index"),
++                nowSeconds = 100_000L + index,
++            )
++        }
++
++        val queue = KoReaderSyncQueue.decode(raw)
++        assertEquals(KoReaderSyncQueue.MAX_ENTRIES, queue.size)
++        assertEquals("document-5", queue.first().document)
++    }
++
++    private fun item(
++        document: String = "document",
++        progress: String = "10",
++        account: String = "account",
++    ) = KoReaderQueuedProgress(
++        account = account,
++        document = document,
++        progress = progress,
++        percentage = 0.5,
++        device = "device",
++        deviceId = "device-id",
++    )
++}
+diff --git a/gradle.properties b/gradle.properties
+index 65a4d2ced..02926e80a 100644
+--- a/gradle.properties
++++ b/gradle.properties
+@@ -17,6 +17,7 @@ org.gradle.jvmargs=-XX:+UseParallelGC -Xmx6g -Xms256m -XX:MaxMetaspaceSize=768m
+ # Android operating system, and which are packaged with your app's APK
+ # https://developer.android.com/topic/libraries/support-library/androidx-rn
+ android.useAndroidX=true
++android.overridePathCheck=true
+ # Automatically convert third-party libraries to use AndroidX
+ android.enableJetifier=false
+ # Kotlin code style for this project: "official" or "obsolete":

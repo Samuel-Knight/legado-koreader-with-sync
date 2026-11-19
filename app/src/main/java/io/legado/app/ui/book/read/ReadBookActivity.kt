@@ -46,6 +46,7 @@ import io.legado.app.data.entities.Bookmark
 import io.legado.app.data.entities.rule.ReviewRule
 import io.legado.app.exception.NoStackTraceException
 import io.legado.app.help.AppWebDav
+import io.legado.app.help.koReader.AppKoReader
 import io.legado.app.help.HighlightColors
 import io.legado.app.help.HighlightStyle
 import io.legado.app.help.HighlightStyles
@@ -102,6 +103,7 @@ import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.TEXT_ACCEN
 import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.TEXT_COLOR
 import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.UNDERLINE_COLOR
 import io.legado.app.ui.book.read.config.MoreConfigDialog
+import io.legado.app.ui.book.read.config.KoReaderSyncDialog
 import io.legado.app.ui.book.read.config.ReadAloudDialog
 import io.legado.app.ui.book.read.config.ReaderMenuConfigDialog
 import io.legado.app.ui.book.read.config.ReadStyleDialog
@@ -314,6 +316,11 @@ class ReadBookActivity : BaseReadBookActivity(),
     private val prevPageDebounce by lazy { Debounce { keyPage(PageDirection.PREV) } }
     private var bookChanged = false
     private var pageChanged = false
+    private var koReaderPageCounter = 0
+    private var koReaderLastPosition: Pair<Int, Int>? = null
+    private var koReaderPageSyncJob: Job? = null
+    private var koReaderPageSyncScheduled = false
+    private var koReaderPageSyncGeneration = 0
     private val aloudControls by lazy {
         ReadAloudControls(binding.readAloudFloatBarContainer) { updateReadAloudFloatBar() }
     }
@@ -712,8 +719,24 @@ class ReadBookActivity : BaseReadBookActivity(),
         networkChangedListener.register()
         networkChangedListener.onNetworkChanged = {
             // 当网络是可用状态且无需初始化时同步进度（初始化中已有同步进度逻辑）
-            if (AppConfig.syncBookProgressPlus && NetworkUtils.isAvailable() && !justInitData && ReadBook.inBookshelf) {
-                ReadBook.syncProgress({ progress -> sureNewProgress(progress) })
+            if ((AppConfig.syncBookProgressPlus || AppConfig.koReaderSyncEnabled) &&
+                NetworkUtils.isAvailable() && !justInitData && ReadBook.inBookshelf
+            ) {
+                lifecycleScope.launch {
+                    if (AppConfig.koReaderSyncEnabled) {
+                        runCatching {
+                            withContext(IO) { AppKoReader.drainUploadQueue() }
+                        }.onFailure {
+                            if (it is CancellationException) throw it
+                            AppLog.put("重试 KOReader 待上传进度失败", it)
+                        }
+                    }
+                    withContext(Main) {
+                        ReadBook.syncProgress(
+                            newProgressAction = { progress -> sureNewProgress(progress) }
+                        )
+                    }
+                }
             }
         }
     }
@@ -747,13 +770,21 @@ class ReadBookActivity : BaseReadBookActivity(),
         binding.readView.updateScrollReadPosition()
         ReadBook.saveRead()
         ReadBook.cancelPreDownloadTask()
+        koReaderPageSyncJob?.cancel()
+        koReaderPageSyncGeneration++
+        koReaderPageSyncScheduled = false
+        koReaderPageCounter = 0
         unregisterReceiver(timeBatteryReceiver)
         upSystemUiVisibility()
-        if (!BuildConfig.DEBUG && ReadBook.inBookshelf) {
-            if (AppConfig.syncBookProgressPlus) {
-                ReadBook.syncProgress()
-            } else {
-                ReadBook.uploadProgress()
+        if (ReadBook.inBookshelf) {
+            when {
+                AppConfig.syncBookProgressPlus -> {
+                    pushKoReaderProgress()
+                    ReadBook.syncProgress()
+                }
+
+                AppConfig.syncBookProgress -> ReadBook.uploadProgress()
+                AppConfig.koReaderSyncEnabled -> pushKoReaderProgress()
             }
         }
         if (!BuildConfig.DEBUG) {
@@ -833,11 +864,13 @@ class ReadBookActivity : BaseReadBookActivity(),
             }
         }
         lifecycleScope.launch {
-            val show = ReadBook.inBookshelf && withContext(IO) {
-                AppWebDav.isOk
-            }
+            val show = ReadBook.inBookshelf && (
+                AppKoReader.isConfigured || withContext(IO) { AppWebDav.isOk }
+            )
             menu.findItem(R.id.menu_get_progress)?.isVisible = show
             menu.findItem(R.id.menu_cover_progress)?.isVisible = show
+            menu.findItem(R.id.menu_koreader_sync)?.isVisible =
+                ReadBook.inBookshelf
             menu.findItem(R.id.menu_reader_more)?.isVisible = hasHiddenReaderItems(menu)
         }
         menu.findItem(R.id.menu_reader_more)?.isVisible = hasHiddenReaderItems(menu)
@@ -862,7 +895,17 @@ class ReadBookActivity : BaseReadBookActivity(),
             .forEach { primaryItems += it }
 
         val popupItems = buildList {
-            addAll(primaryItems.map(::toReaderPopupItem))
+            add(
+                PopupAction.PopupActionItem(
+                    title = getString(R.string.koreader_sync),
+                    value = ACTION_KOREADER_SYNC
+                )
+            )
+            addAll(
+                primaryItems
+                    .filterNot { it.itemId == R.id.menu_koreader_sync }
+                    .map(::toReaderPopupItem)
+            )
             if (moreItems.isNotEmpty()) {
                 add(
                     PopupAction.PopupActionItem(
@@ -886,6 +929,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         popup.onActionClick = { action ->
             popup.dismiss()
             when {
+                action == ACTION_KOREADER_SYNC -> showDialogFragment(KoReaderSyncDialog())
                 action == ACTION_READER_MORE -> showReaderMoreMenu(anchor, menu)
                 action == ACTION_READER_CONFIG -> showReaderMenuConfig()
                 action.startsWith(ACTION_READER_ITEM_PREFIX) -> action
@@ -1173,6 +1217,8 @@ class ReadBookActivity : BaseReadBookActivity(),
                     sureSyncProgress(progress)
                 }
             }
+
+            R.id.menu_koreader_sync -> showDialogFragment(KoReaderSyncDialog())
 
             R.id.menu_cover_progress -> ReadBook.book?.let {
                 ReadBook.uploadProgress(true) { toastOnUi(R.string.upload_book_success) }
@@ -1860,6 +1906,7 @@ class ReadBookActivity : BaseReadBookActivity(),
      */
     override fun pageChanged() {
         pageChanged = true
+        scheduleKoReaderPageSync()
         if (!isScroll) aloudControls.onMovement(100f)
         binding.readView.onPageChange()
         highlightPopup?.dismiss()
@@ -1870,6 +1917,60 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
         executor.execute {
             startBackupJob()
+        }
+    }
+
+    private fun scheduleKoReaderPageSync() {
+        if (!AppConfig.koReaderSyncEnabled) return
+        ReadBook.book?.let { AppKoReader.markPageTurn(it) }
+        if (!AppKoReader.hasCredentials) return
+        val threshold = AppConfig.koReaderPagesBeforeSync
+        if (threshold <= 0 || !ReadBook.inBookshelf) return
+        val position = ReadBook.durChapterIndex to ReadBook.durChapterPos
+        if (position == koReaderLastPosition) return
+        koReaderLastPosition = position
+        if (koReaderPageSyncScheduled) {
+            scheduleKoReaderPushAfterIdle()
+            return
+        }
+        koReaderPageCounter++
+        if (koReaderPageCounter < threshold) return
+        scheduleKoReaderPushAfterIdle()
+    }
+
+    private fun scheduleKoReaderPushAfterIdle() {
+        koReaderPageSyncScheduled = true
+        koReaderPageSyncJob?.cancel()
+        val generation = ++koReaderPageSyncGeneration
+        koReaderPageSyncJob = lifecycleScope.launch {
+            delay(10_000)
+            try {
+                val book = ReadBook.book?.takeIf { it.isLocal } ?: return@launch
+                runCatching {
+                    withContext(IO) { AppKoReader.uploadBookProgress(book) }
+                }.onFailure {
+                    if (it is CancellationException) throw it
+                    AppLog.put("分页触发 KOReader 进度同步失败《${book.name}》", it)
+                }
+            } finally {
+                if (generation == koReaderPageSyncGeneration) {
+                    koReaderPageSyncScheduled = false
+                    koReaderPageCounter = 0
+                }
+            }
+        }
+    }
+
+    private fun pushKoReaderProgress() {
+        if (!AppConfig.koReaderSyncEnabled) return
+        val book = ReadBook.book?.takeIf { it.isLocal } ?: return
+        lifecycleScope.launch(IO) {
+            runCatching {
+                AppKoReader.uploadBookProgress(book, interactive = false)
+            }.onFailure {
+                if (it is CancellationException) throw it
+                AppLog.put("推送 KOReader 阅读进度失败《${book.name}》", it)
+            }
         }
     }
 
@@ -3216,6 +3317,39 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
     }
 
+    override fun koReaderProgressReady(
+        progress: BookProgress,
+        device: String?,
+        remoteIsNewer: Boolean,
+        localPercentage: Double,
+        remotePercentage: Double,
+    ) {
+        syncDialog?.dismiss()
+        val direction = getString(
+            if (remoteIsNewer) R.string.koreader_prompt_newer else R.string.koreader_prompt_older
+        )
+        val deviceName = device?.takeIf { it.isNotBlank() } ?: getString(R.string.koreader_unknown_device)
+        syncDialog = alert(R.string.koreader_sync) {
+            setMessage(
+                getString(
+                    R.string.koreader_prompt_message,
+                    getString(R.string.koreader_progress_percentage, localPercentage * 100),
+                    getString(R.string.koreader_progress_percentage, remotePercentage * 100),
+                    direction,
+                    deviceName,
+                    progress.durChapterTitle,
+                )
+            )
+            okButton {
+                ReadAloud.detachReadAloudFollow()
+                if (ReadBook.setProgress(progress)) {
+                    toastOnUi(R.string.koreader_progress_pulled)
+                }
+            }
+            noButton()
+        }
+    }
+
     override fun finish() {
         val book = ReadBook.book ?: return super.finish()
         if (ReadBook.inBookshelf) {
@@ -3467,6 +3601,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         private const val REVIEW_DIALOG_REQUEST_COOLDOWN_MS = 1500L
         const val RESULT_DELETED = 100
         private const val ACTION_READER_ITEM_PREFIX = "readerItem:"
+        private const val ACTION_KOREADER_SYNC = "koReaderSync"
         private const val ACTION_READER_MORE = "readerMore"
         private const val ACTION_READER_CONFIG = "readerConfig"
         private const val ACTION_HIGHLIGHT_STYLE = "highlightStyle"

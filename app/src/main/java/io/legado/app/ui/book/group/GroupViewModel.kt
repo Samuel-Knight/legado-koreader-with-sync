@@ -43,8 +43,10 @@ class GroupViewModel(application: Application) : BaseViewModel(application) {
 
     fun delGroup(bookGroup: BookGroup, finally: () -> Unit) {
         execute {
-            appDb.bookGroupDao.delete(bookGroup)
-            appDb.bookDao.removeGroup(bookGroup.groupId)
+            appDb.runInTransaction {
+                appDb.bookDao.removeGroup(bookGroup.groupId)
+                appDb.bookGroupDao.delete(bookGroup)
+            }
         }.onFinally {
             finally()
         }

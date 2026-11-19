@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <io.legado.app.lib.prefs.PreferenceCategory
+        android:title="@string/koreader_sync"
+        app:allowDividerAbove="false"
+        app:allowDividerBelow="false"
+        app:iconSpaceReserved="false">
+
+        <io.legado.app.lib.prefs.SwitchPreference
+            android:defaultValue="false"
+            android:key="koReaderSyncEnabled"
+            android:summary="@string/koreader_auto_sync_summary"
+            android:title="@string/koreader_auto_sync"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.Preference
+            android:key="koreaderAccount"
+            android:summary="@string/koreader_account_summary"
+            android:title="@string/koreader_account"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.Preference
+            android:dependency="koReaderSyncEnabled"
+            android:key="koReaderPagesBeforeSync"
+            android:title="@string/koreader_pages_before_sync"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.NameListPreference
+            android:defaultValue="prompt"
+            android:entries="@array/koreader_sync_strategy_title"
+            android:entryValues="@array/koreader_sync_strategy_value"
+            android:key="koReaderSyncForward"
+            android:summary="@string/koreader_sync_forward_summary"
+            android:title="@string/koreader_sync_forward"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.NameListPreference
+            android:defaultValue="disable"
+            android:entries="@array/koreader_sync_strategy_title"
+            android:entryValues="@array/koreader_sync_strategy_value"
+            android:key="koReaderSyncBackward"
+            android:summary="@string/koreader_sync_backward_summary"
+            android:title="@string/koreader_sync_backward"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.Preference
+            android:key="koReaderPushNow"
+            android:title="@string/koreader_push_now"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.Preference
+            android:key="koReaderPullNow"
+            android:title="@string/koreader_pull_now"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.NameListPreference
+            android:defaultValue="binary"
+            android:entries="@array/koreader_matching_title"
+            android:entryValues="@array/koreader_matching_value"
+            android:key="koReaderMatchingMode"
+            android:summary="@string/koreader_matching_summary_short"
+            android:title="@string/koreader_matching"
+            app:iconSpaceReserved="false" />
+
+        <io.legado.app.lib.prefs.SwitchPreference
+            android:defaultValue="false"
+            android:key="koReaderSendMetadata"
+            android:summary="@string/koreader_send_metadata_summary"
+            android:title="@string/koreader_send_metadata"
+            app:iconSpaceReserved="false" />
+
+    </io.legado.app.lib.prefs.PreferenceCategory>
+
+</androidx.preference.PreferenceScreen>

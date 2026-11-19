@@ -20,6 +20,7 @@ enum class ReaderMenuItem(
     EditContent("editContent", intArrayOf(R.id.menu_edit_content), R.string.edit_content),
     PageAnim("pageAnim", intArrayOf(R.id.menu_page_anim), R.string.book_page_anim),
     GetProgress("getProgress", intArrayOf(R.id.menu_get_progress), R.string.get_book_progress),
+    KoReaderSync("koReaderSync", intArrayOf(R.id.menu_koreader_sync), R.string.koreader_sync),
     CoverProgress("coverProgress", intArrayOf(R.id.menu_cover_progress), R.string.cover_book_progress),
     ReverseContent("reverseContent", intArrayOf(R.id.menu_reverse_content), R.string.reverse_content),
     SimulatedReading(

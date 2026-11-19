@@ -1,0 +1,10 @@
+* text=auto
+
+# Keep generated patches byte-stable so their context remains applicable.
+*.patch -text -diff
+
+# Platform-specific scripts keep their conventional line endings.
+gradlew text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf

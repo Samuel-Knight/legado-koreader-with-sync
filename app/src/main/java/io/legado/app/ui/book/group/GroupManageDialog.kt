@@ -20,6 +20,7 @@ import io.legado.app.data.appDb
 import io.legado.app.data.entities.BookGroup
 import io.legado.app.databinding.DialogRecyclerViewBinding
 import io.legado.app.databinding.ItemBookGroupManageBinding
+import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.lib.theme.backgroundColor
 import io.legado.app.lib.theme.primaryColor
@@ -123,6 +124,7 @@ class GroupManageDialog : BaseDialogFragment(R.layout.dialog_recycler_view),
                 root.setBackgroundColor(context.backgroundColor)
                 tvGroup.text = item.getManageName(context)
                 swShow.isChecked = item.show
+                tvDel.visible(item.groupId > 0)
             }
         }
 
@@ -133,6 +135,11 @@ class GroupManageDialog : BaseDialogFragment(R.layout.dialog_recycler_view),
                         showDialogFragment(
                             GroupEditDialog(bookGroup)
                         )
+                    }
+                }
+                tvDel.setOnClickListener {
+                    getItem(holder.layoutPosition)?.let { bookGroup ->
+                        confirmDeleteGroup(bookGroup)
                     }
                 }
                 swShow.setOnUserCheckedChangeListener { isChecked ->
@@ -157,6 +164,15 @@ class GroupManageDialog : BaseDialogFragment(R.layout.dialog_recycler_view),
                 viewModel.upGroup(*getItems().toTypedArray())
             }
             isMoved = false
+        }
+    }
+
+    private fun confirmDeleteGroup(bookGroup: BookGroup) {
+        alert(R.string.delete, R.string.book_group_delete_message) {
+            yesButton {
+                viewModel.delGroup(bookGroup) {}
+            }
+            noButton()
         }
     }
 

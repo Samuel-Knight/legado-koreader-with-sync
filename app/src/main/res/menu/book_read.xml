@@ -71,6 +71,12 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/menu_koreader_sync"
+        android:title="@string/koreader_sync"
+        android:visible="false"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_cover_progress"
         android:title="@string/cover_book_progress"
         android:visible="false"

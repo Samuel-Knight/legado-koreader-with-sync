@@ -21,8 +21,8 @@ static def releaseTime() {
 }
 
 def name = "legado"
-def version = "3." + releaseTime()
-def versionCodeValue = 30000
+def version = "3.26101819-koreader-sync"
+def versionCodeValue = 38485
 // Preserve the published code at this point, then ignore GitHub wrapper merge commits.
 def versionCodeBaseCommit = '9639f027fbc8cfdf57ce136a9e0c98829a235aef'
 def versionCodeAtBase = 37540
@@ -112,7 +112,7 @@ android {
             if (project.hasProperty("RELEASE_STORE_FILE")) {
                 signingConfig = signingConfigs.myConfig
             }
-            applicationIdSuffix '.release'
+            applicationIdSuffix '.releaseA'
             if (getApplicationIdSuffix() == '.releaseA') {
                 manifestPlaceholders.put("app_name", "@string/app_name_a")
             } else {
