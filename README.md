@@ -12,11 +12,20 @@ Legado 是一款免费的 Android 平台开源小说阅读器。
 
 本仓库基于 [LegadoTeam/legado](https://github.com/LegadoTeam/legado) 增加 KOReader KOSync 进度同步，并将改动合并到上游 `master` 的最新代码。应用使用独立包名 `com.legado.app.releaseA`，可以与 Legado 官方普通版同时安装。
 
-本项目以官方原版 [legado_app_3.26101819_releaseA.apk](https://github.com/LegadoTeam/legado/releases/download/3.26101819/legado_app_3.26101819_releaseA.apk) 为基线进行修改和功能测试，并已将同步改动适配至同期其他 Legado 版本。
+本项目以官方原版 [legado_app_3.26101819_releaseA.apk](https://github.com/LegadoTeam/legado/releases/download/3.26101819/legado_app_3.26101819_releaseA.apk) 为基线进行修改和功能测试。
 
 兼容性方面，已在安卓版 KOReader、Readest 和 Kindle 端 KOReader 完成 KOSync 进度同步测试。
 
 详细使用方法见 [KOREADER_SYNC_README.md](KOREADER_SYNC_README.md)。可重复构建脚本位于 [scripts/koreader-sync](scripts/koreader-sync/README.md)；构建出的 APK 应作为 GitHub Release 资产发布，不提交到源码仓库。
+
+## 功能页面
+
+<p align="center">
+  <img src="docs/images/koreader-sync-reading-menu.jpg" width="360" alt="阅读页 KOReader 同步菜单">
+  <img src="docs/images/koreader-sync-account-settings.jpg" width="360" alt="KOReader 账号与服务器设置">
+</p>
+
+<p align="center"><sub>阅读页同步菜单</sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<sub>KOReader 账号与服务器</sub></p>
 
 ## 相对原版的改动
 
