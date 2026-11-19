@@ -19,6 +19,8 @@ import io.legado.app.data.entities.ReadRecord
 import io.legado.app.data.entities.updateSnapshot
 import io.legado.app.data.entities.saveWithCover
 import io.legado.app.help.AppWebDav
+import io.legado.app.help.koReader.AppKoReader
+import io.legado.app.help.koReader.KoReaderSyncStrategy
 import io.legado.app.help.HighlightAnchor
 import io.legado.app.help.HighlightMatcher
 import io.legado.app.help.HighlightRuleMatcher
@@ -731,21 +733,21 @@ object ReadBook : CoroutineScope by MainScope() {
         }
     }
 
-    fun setProgress(progress: BookProgress) {
+    fun setProgress(progress: BookProgress): Boolean {
         if (BaseReadAloudService.isRun) {
             ReadAloud.detachReadAloudFollow()
         }
-        if (progress.durChapterIndex < chapterSize &&
-            (durChapterIndex != progress.durChapterIndex
-                    || durChapterPos != progress.durChapterPos)
-        ) {
-            durChapterIndex = progress.durChapterIndex
-            durChapterPos = progress.durChapterPos
-            saveRead()
-            clearTextChapter()
-            callBack?.upContent()
-            loadContent(resetPageOffset = true)
-        }
+        if (progress.durChapterIndex !in 0 until chapterSize) return false
+        if (durChapterIndex == progress.durChapterIndex &&
+            durChapterPos == progress.durChapterPos
+        ) return false
+        durChapterIndex = progress.durChapterIndex
+        durChapterPos = progress.durChapterPos
+        saveRead()
+        clearTextChapter()
+        callBack?.upContent()
+        loadContent(resetPageOffset = true)
+        return true
     }
 
     //暂时保存跳转前进度
@@ -815,6 +817,14 @@ object ReadBook : CoroutineScope by MainScope() {
     fun uploadProgress(toast: Boolean = false, successAction: (() -> Unit)? = null) {
         book?.let {
             launch(IO) {
+                if (AppConfig.koReaderSyncEnabled) {
+                    try {
+                        AppKoReader.uploadBookProgress(it, interactive = toast)
+                    } catch (error: Throwable) {
+                        currentCoroutineContext().ensureActive()
+                        AppLog.put("推送 KOReader 进度失败《${it.name}》\n${error.localizedMessage}", error, toast)
+                    }
+                }
                 AppWebDav.uploadBookProgress(it, toast) {
                     successAction?.invoke()
                 }
@@ -833,29 +843,57 @@ object ReadBook : CoroutineScope by MainScope() {
         uploadSuccessAction: (() -> Unit)? = null,
         syncSuccessAction: (() -> Unit)? = null
     ) {
-        if (!AppConfig.syncBookProgress) return
+        if (!AppConfig.syncBookProgress && !AppConfig.koReaderSyncEnabled) return
         val book = book ?: return
-        Coroutine.async {
-            AppWebDav.getBookProgress(book)
-        }.onError {
-            AppLog.put("拉取阅读进度失败", it)
-        }.onSuccess { progress ->
-            if (progress == null || progress.durChapterIndex < book.durChapterIndex ||
-                (progress.durChapterIndex == book.durChapterIndex
-                        && progress.durChapterPos < book.durChapterPos)
-            ) {
-                // 服务器没有进度或者进度比服务器快，上传现有进度
-                Coroutine.async {
-                    AppWebDav.uploadBookProgress(BookProgress(book), uploadSuccessAction)
-                    book.update()
+        if (AppConfig.koReaderSyncEnabled) {
+            Coroutine.async {
+                AppKoReader.getAutoSync(book)
+            }.onError {
+                AppLog.put("拉取 KOReader 阅读进度失败《${book.name}》", it)
+            }.onSuccess { autoSync ->
+                autoSync ?: return@onSuccess
+                when (autoSync.decision.strategy) {
+                    KoReaderSyncStrategy.SILENT -> {
+                        setProgress(autoSync.progress)
+                        AppLog.put("自动同步 KOReader 阅读进度成功《${book.name}》")
+                    }
+
+                    KoReaderSyncStrategy.PROMPT -> callBack?.koReaderProgressReady(
+                        progress = autoSync.progress,
+                        device = autoSync.remote.device,
+                        remoteIsNewer = autoSync.decision.remoteIsNewer,
+                        localPercentage = autoSync.localPercentage,
+                        remotePercentage = autoSync.remotePercentage,
+                    )
+
+                    KoReaderSyncStrategy.DISABLE -> Unit
                 }
-            } else if (progress.durChapterIndex > book.durChapterIndex ||
-                progress.durChapterPos > book.durChapterPos
-            ) {
-                // 进度比服务器慢，执行传入动作
-                newProgressAction?.invoke(progress)
-            } else {
-                syncSuccessAction?.invoke()
+            }
+        }
+        if (AppConfig.syncBookProgress) {
+            Coroutine.async {
+                AppWebDav.getBookProgress(book)
+            }.onError {
+                AppLog.put("拉取阅读进度失败", it)
+            }.onSuccess { progress ->
+                if (progress == null || progress.durChapterIndex < book.durChapterIndex ||
+                    (progress.durChapterIndex == book.durChapterIndex
+                            && progress.durChapterPos < book.durChapterPos)
+                ) {
+                    // 服务器没有进度或者进度比服务器快，上传现有进度
+                    Coroutine.async {
+                        AppWebDav.uploadBookProgress(BookProgress(book), uploadSuccessAction)
+                        book.update()
+                    }
+                } else if (progress.durChapterIndex > book.durChapterIndex ||
+                    (progress.durChapterIndex == book.durChapterIndex
+                            && progress.durChapterPos > book.durChapterPos)
+                ) {
+                    // 进度比服务器慢，执行传入动作
+                    newProgressAction?.invoke(progress)
+                } else {
+                    syncSuccessAction?.invoke()
+                }
             }
         }
     }
@@ -1218,6 +1256,18 @@ object ReadBook : CoroutineScope by MainScope() {
     val durPageIndex: Int
         get() {
             return curTextChapter?.getPageIndexByCharIndex(durChapterPos) ?: durChapterPos
+        }
+
+    /**
+     * KOReader uses current_page / page_count for its progress percentage.
+     * Keep the same one-based page semantics when the current chapter is fully laid out.
+     */
+    val koReaderPageFraction: Double?
+        get() {
+            val textChapter = curTextChapter?.takeIf { it.isCompleted } ?: return null
+            val pageIndex = durPageIndex.takeIf { it >= 0 } ?: return null
+            val pageCount = textChapter.pageSize.takeIf { it > 0 } ?: return null
+            return (pageIndex + 1).coerceAtMost(pageCount).toDouble() / pageCount
         }
 
     /**
@@ -2196,6 +2246,14 @@ object ReadBook : CoroutineScope by MainScope() {
         fun notifyBookChanged()
 
         fun sureNewProgress(progress: BookProgress)
+
+        fun koReaderProgressReady(
+            progress: BookProgress,
+            device: String?,
+            remoteIsNewer: Boolean,
+            localPercentage: Double,
+            remotePercentage: Double,
+        )
 
         fun cancelSelect()
     }

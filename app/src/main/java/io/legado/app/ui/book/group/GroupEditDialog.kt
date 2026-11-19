@@ -162,7 +162,7 @@ class GroupEditDialog() : BaseDialogFragment(R.layout.dialog_book_group_edit) {
     }
 
     private fun deleteGroup(ok: () -> Unit) {
-        alert(R.string.delete, R.string.sure_del) {
+        alert(R.string.delete, R.string.book_group_delete_message) {
             yesButton {
                 ok.invoke()
             }

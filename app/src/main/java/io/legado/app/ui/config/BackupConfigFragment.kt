@@ -30,6 +30,7 @@ import io.legado.app.help.AppWebDav
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.LocalConfig
 import io.legado.app.help.coroutine.Coroutine
+import io.legado.app.help.koReader.AppKoReader
 import io.legado.app.help.storage.Backup
 import io.legado.app.help.storage.BackupConfig
 import io.legado.app.help.storage.ImportOldData
@@ -55,6 +56,7 @@ import io.legado.app.utils.externalFiles
 import io.legado.app.utils.getPrefString
 import io.legado.app.utils.isContentScheme
 import io.legado.app.utils.launch
+import io.legado.app.utils.putPrefString
 import io.legado.app.utils.setEdgeEffectColor
 import io.legado.app.utils.showDialogFragment
 import io.legado.app.utils.showHelp
@@ -137,6 +139,19 @@ class BackupConfigFragment : PreferenceFragment(),
                 editText.setSelection(editText.text.length)
             }
         }
+        findPreference<EditTextPreference>(PreferKey.koReaderPassword)?.let {
+            it.setOnBindEditTextListener { editText ->
+                editText.inputType =
+                    InputType.TYPE_TEXT_VARIATION_PASSWORD or InputType.TYPE_CLASS_TEXT
+                editText.setSelection(editText.text.length)
+            }
+        }
+        findPreference<EditTextPreference>(PreferKey.koReaderDeviceName)?.let {
+            it.setOnBindEditTextListener { editText ->
+                editText.text = AppConfig.koReaderDeviceName.toEditable()
+                editText.setSelection(editText.text.length)
+            }
+        }
         findPreference<EditTextPreference>(PreferKey.webDavDir)?.let {
             it.setOnBindEditTextListener { editText ->
                 editText.text = AppConfig.webDavDir?.toEditable()
@@ -154,6 +169,11 @@ class BackupConfigFragment : PreferenceFragment(),
         upPreferenceSummary(PreferKey.webDavPassword, getPrefString(PreferKey.webDavPassword))
         upPreferenceSummary(PreferKey.webDavDir, AppConfig.webDavDir)
         upPreferenceSummary(PreferKey.webDavDeviceName, AppConfig.webDavDeviceName)
+        upPreferenceSummary(PreferKey.koReaderServer, AppConfig.koReaderServer)
+        upPreferenceSummary(PreferKey.koReaderUsername, AppConfig.koReaderUsername)
+        upPreferenceSummary(PreferKey.koReaderPassword, AppConfig.koReaderPassword)
+        upPreferenceSummary(PreferKey.koReaderDeviceName, AppConfig.koReaderDeviceName)
+        upPreferenceSummary(PreferKey.koReaderMatchingMode, AppConfig.koReaderMatchingMode)
         upPreferenceSummary(PreferKey.backupPath, getPrefString(PreferKey.backupPath))
         updateAutoBackupSummary()
         findPreference<io.legado.app.lib.prefs.Preference>("web_dav_restore")
@@ -218,6 +238,12 @@ class BackupConfigFragment : PreferenceFragment(),
                 viewModel.upWebDavConfig()
             }
 
+            PreferKey.koReaderServer,
+            PreferKey.koReaderUsername,
+            PreferKey.koReaderPassword,
+            PreferKey.koReaderDeviceName,
+            PreferKey.koReaderMatchingMode -> upPreferenceSummary(key, appCtx.getPrefString(key))
+
             PreferKey.webDavDeviceName -> upPreferenceSummary(key, getPrefString(key))
         }
     }
@@ -254,6 +280,18 @@ class BackupConfigFragment : PreferenceFragment(),
                 else -> value
             }
 
+            PreferKey.koReaderPassword ->
+                preference.summary = if (value.isNullOrEmpty()) {
+                    getString(R.string.koreader_password_s)
+                } else {
+                    "*".repeat(value.length)
+                }
+
+            PreferKey.koReaderServer,
+            PreferKey.koReaderUsername,
+            PreferKey.koReaderDeviceName -> preference.summary =
+                value?.takeIf { it.isNotBlank() } ?: preference.summary
+
             else -> {
                 if (preference is ListPreference) {
                     val index = preference.findIndexOfValue(value)
@@ -276,8 +314,32 @@ class BackupConfigFragment : PreferenceFragment(),
             PreferKey.autoBackup -> configureAutoBackup()
             "web_dav_restore" -> restore()
             "lan_backup_transfer" -> lanBackupTransfer()
+            PreferKey.koReaderTestAuth -> testKoReaderAuthentication()
         }
         return super.onPreferenceTreeClick(preference)
+    }
+
+    private fun testKoReaderAuthentication() {
+        val normalizedServer = AppKoReader.normalizedServerUrl
+        if (normalizedServer != getPrefString(PreferKey.koReaderServer)) {
+            appCtx.putPrefString(PreferKey.koReaderServer, normalizedServer)
+            upPreferenceSummary(PreferKey.koReaderServer, normalizedServer)
+        }
+        waitDialog.setText(R.string.koreader_test_auth)
+        waitDialog.show()
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                AppKoReader.verifyAuthentication()
+                appCtx.toastOnUi(R.string.koreader_auth_success)
+            } catch (error: Throwable) {
+                AppLog.put("KOReader 账号验证失败\n${error.localizedMessage}", error)
+                appCtx.toastOnUi(
+                    getString(R.string.koreader_sync_failed, error.localizedMessage ?: "unknown")
+                )
+            } finally {
+                waitDialog.dismiss()
+            }
+        }
     }
 
     private fun defaultBackupPathSummary() =

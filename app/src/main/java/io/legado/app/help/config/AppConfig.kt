@@ -8,6 +8,7 @@ import io.legado.app.constant.AppConst
 import io.legado.app.constant.PreferKey
 import io.legado.app.data.appDb
 import io.legado.app.help.book.ResourceThemeGeneration
+import io.legado.app.help.koReader.KoReaderDefaults
 import io.legado.app.utils.GSON
 import io.legado.app.utils.canvasrecorder.CanvasRecorderFactory
 import io.legado.app.utils.defaultSharedPreferences
@@ -724,6 +725,31 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
 
     val syncBookProgressPlus get() = appCtx.getPrefBoolean(PreferKey.syncBookProgressPlus, false)
 
+    val koReaderSyncEnabled get() = appCtx.getPrefBoolean(PreferKey.koReaderSyncEnabled, false)
+
+    val koReaderPagesBeforeSync
+        get() = appCtx.getPrefString(PreferKey.koReaderPagesBeforeSync, "0")
+            ?.toIntOrNull()?.coerceIn(0, 999) ?: 0
+
+    val koReaderSyncForward
+        get() = appCtx.getPrefString(PreferKey.koReaderSyncForward, KO_READER_SYNC_PROMPT).orEmpty()
+
+    val koReaderSyncBackward
+        get() = appCtx.getPrefString(PreferKey.koReaderSyncBackward, KO_READER_SYNC_DISABLE).orEmpty()
+
+    val koReaderServer
+        get() = appCtx.getPrefString(PreferKey.koReaderServer, KoReaderDefaults.SERVER_URL).orEmpty()
+
+    val koReaderUsername get() = appCtx.getPrefString(PreferKey.koReaderUsername).orEmpty()
+
+    val koReaderPassword get() = appCtx.getPrefString(PreferKey.koReaderPassword).orEmpty()
+
+    val koReaderMatchingMode get() = appCtx.getPrefString(PreferKey.koReaderMatchingMode, KO_READER_MATCH_BINARY).orEmpty()
+
+    val koReaderSendMetadata get() = appCtx.getPrefBoolean(PreferKey.koReaderSendMetadata, false)
+
+    val koReaderDeviceName get() = appCtx.getPrefString(PreferKey.koReaderDeviceName, Build.MODEL).orEmpty()
+
     val mediaButtonOnExit get() = appCtx.getPrefBoolean("mediaButtonOnExit", true)
 
     val readAloudByMediaButton
@@ -747,6 +773,12 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
 
     val webDavBookAutoRestore
         get() = appCtx.getPrefBoolean(PreferKey.webDavBookAutoRestore, false)
+
+    const val KO_READER_MATCH_BINARY = "binary"
+    const val KO_READER_MATCH_FILENAME = "filename"
+    const val KO_READER_SYNC_SILENT = "silent"
+    const val KO_READER_SYNC_PROMPT = "prompt"
+    const val KO_READER_SYNC_DISABLE = "disable"
 
     val recordHeapDump get() = appCtx.getPrefBoolean(PreferKey.recordHeapDump, false)
 

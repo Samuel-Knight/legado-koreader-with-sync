@@ -40,6 +40,7 @@ data class ReaderMenuConfig(
             "editContent",
             "pageAnim",
             "getProgress",
+            "koReaderSync",
             "coverProgress",
             "reverseContent",
             "simulatedReading",

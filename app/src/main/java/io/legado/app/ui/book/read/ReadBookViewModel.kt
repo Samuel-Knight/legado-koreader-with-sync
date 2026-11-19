@@ -17,6 +17,8 @@ import io.legado.app.data.entities.BookChapter
 import io.legado.app.data.entities.BookProgress
 import io.legado.app.exception.NoStackTraceException
 import io.legado.app.help.AppWebDav
+import io.legado.app.help.koReader.AppKoReader
+import io.legado.app.help.koReader.KoReaderSyncStrategy
 import io.legado.app.help.book.BookHelp
 import io.legado.app.help.book.ContentProcessor
 import io.legado.app.help.book.ResourceThemeGeneration
@@ -147,6 +149,7 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
 
     private suspend fun initBook(book: Book) {
         val isSameBook = ReadBook.book?.bookUrl == book.bookUrl
+        AppKoReader.resetBookSession(book)
         if (isSameBook) {
             ReadBook.upData(book)
         } else {
@@ -179,6 +182,7 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
                 }
             }
         }
+        AppKoReader.beginBookSession(book)
         if (ReadBook.chapterChanged) {
             // 有章节跳转不同步阅读进度
             ReadBook.chapterChanged = false
@@ -289,6 +293,37 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
         book: Book,
         alertSync: ((progress: BookProgress) -> Unit)? = null
     ) {
+        if (!AppConfig.syncBookProgress && !AppConfig.koReaderSyncEnabled) return
+        if (AppConfig.koReaderSyncEnabled) {
+            execute {
+                AppKoReader.getAutoSync(book)
+            }.onError {
+                AppLog.put("拉取 KOReader 阅读进度失败《${book.name}》\n${it.localizedMessage}", it)
+            }.onSuccess { autoSync ->
+                autoSync ?: return@onSuccess
+                val progress = autoSync.progress
+                if (progress.durChapterIndex >= book.simulatedTotalChapterNum()) {
+                    return@onSuccess
+                }
+                when (autoSync.decision.strategy) {
+                    KoReaderSyncStrategy.SILENT -> {
+                        ReadBook.setProgress(progress)
+                        AppLog.put("自动同步 KOReader 阅读进度成功《${book.name}》 ${progress.durChapterTitle}")
+                        context.toastOnUi("已从 KOReader 同步阅读进度")
+                    }
+
+                    KoReaderSyncStrategy.PROMPT -> ReadBook.callBack?.koReaderProgressReady(
+                        progress = progress,
+                        device = autoSync.remote.device,
+                        remoteIsNewer = autoSync.decision.remoteIsNewer,
+                        localPercentage = autoSync.localPercentage,
+                        remotePercentage = autoSync.remotePercentage,
+                    )
+
+                    KoReaderSyncStrategy.DISABLE -> Unit
+                }
+            }
+        }
         if (!AppConfig.syncBookProgress) return
         execute {
             AppWebDav.getBookProgress(book)

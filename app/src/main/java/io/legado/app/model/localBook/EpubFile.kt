@@ -10,6 +10,7 @@ import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
 import io.legado.app.help.book.BookHelp
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.koReader.KoReaderProgressMapper
 import io.legado.app.utils.FileUtils
 import io.legado.app.utils.HtmlFormatter
 import io.legado.app.utils.encodeURI
@@ -22,6 +23,8 @@ import me.ag2s.epublib.epub.EpubReader
 import me.ag2s.epublib.util.zip.AndroidZipFile
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import org.jsoup.nodes.Node
+import org.jsoup.nodes.TextNode
 import org.jsoup.parser.Parser
 import org.jsoup.select.Elements
 import java.io.File
@@ -35,6 +38,11 @@ import java.nio.charset.Charset
 class EpubFile(var book: Book) : AutoCloseable {
 
     companion object : BaseLocalBookParse {
+        data class SpineTextLocation(
+            val positionFraction: Double,
+            val anchorFractions: Map<String, Double>,
+        )
+
         private val cache = CloseableCache<EpubFile>()
 
         @Synchronized
@@ -53,6 +61,27 @@ class EpubFile(var book: Book) : AutoCloseable {
         @Synchronized
         fun getToc(book: Book): List<EpubTocNode> =
             epubTocNodes(getEFile(book).epubBook?.tableOfContents?.tocReferences.orEmpty())
+
+        @Synchronized
+        fun getSpineHrefs(book: Book): List<String> =
+            getEFile(book).epubBook?.spine?.spineReferences?.map { it.resource.href }.orEmpty()
+
+        @Synchronized
+        fun getSpineTextLocation(
+            book: Book,
+            pointer: KoReaderProgressMapper.EpubXPointer,
+        ): SpineTextLocation? = getEFile(book).getSpineTextLocation(pointer)
+
+        @Synchronized
+        fun getChapterLengths(book: Book, chapters: List<BookChapter>): List<Int>? =
+            getEFile(book).getChapterLengths(chapters)
+
+        @Synchronized
+        fun getChapterProgressToken(
+            book: Book,
+            chapter: BookChapter,
+            chapterPosition: Int,
+        ): String? = getEFile(book).getChapterProgressToken(chapter, chapterPosition)
 
         @Synchronized
         override fun getContent(book: Book, chapter: BookChapter): String? {
@@ -97,6 +126,8 @@ class EpubFile(var book: Book) : AutoCloseable {
     private var fileDescriptor: ParcelFileDescriptor? = null
     private var zipFile: AndroidZipFile? = null
     private var readingBoundaries: Map<String, BookChapter>? = null
+    private var chapterLengthsCacheKey: List<Pair<String, String?>>? = null
+    private var chapterLengthsCache: List<Int>? = null
     private val checkedContentCaches = HashSet<String>()
     private var epubBook: EpubBook? = null
         get() {
@@ -144,6 +175,265 @@ class EpubFile(var book: Book) : AutoCloseable {
     private fun readingBoundary(chapter: BookChapter): BookChapter {
         if (readingBoundaries == null) getChapterList()
         return readingBoundaries?.get(chapter.url) ?: chapter
+    }
+
+    private fun getSpineTextLocation(
+        pointer: KoReaderProgressMapper.EpubXPointer,
+    ): Companion.SpineTextLocation? {
+        val resource = epubBook?.spine?.spineReferences
+            ?.getOrNull(pointer.fragmentOrdinal - 1)?.resource ?: return null
+        val body = Jsoup.parse(String(resource.data, mCharset)).body()
+        body.select("script, style, title").remove()
+        val totalLength = textLength(body).coerceAtLeast(1)
+        val anchorFractions = linkedMapOf<String, Double>()
+        collectAnchors(body, 0, anchorFractions, totalLength)
+        val targetLength = findTextTarget(body, pointer.nodePath)
+            ?.let { (start, textNode) ->
+                start + pointer.characterOffset.coerceIn(0, textNode.text().length)
+            } ?: return null
+        return Companion.SpineTextLocation(
+            positionFraction = (targetLength.toDouble() / totalLength).coerceIn(0.0, 1.0),
+            anchorFractions = anchorFractions,
+        )
+    }
+
+    private fun getChapterLengths(chapters: List<BookChapter>): List<Int>? {
+        if (chapters.isEmpty()) return null
+        val cacheKey = chapters.map { it.url to it.startFragmentId }
+        if (chapterLengthsCacheKey == cacheKey) return chapterLengthsCache
+        val spine = epubBook?.spine?.spineReferences ?: return null
+        if (spine.isEmpty()) return null
+        val resourceIndexes = spine.mapIndexed { index, reference ->
+            normalizeHref(reference.resource.href) to index
+        }.toMap()
+        val resourceLengths = IntArray(spine.size)
+        val resourceAnchors = arrayOfNulls<Map<String, Double>>(spine.size)
+        spine.forEachIndexed { index, reference ->
+            val body = Jsoup.parse(String(reference.resource.data, mCharset)).body()
+            body.select("script, style, title").remove()
+            val length = textLength(body)
+            val anchors = linkedMapOf<String, Double>()
+            if (length > 0) collectAnchors(body, 0, anchors, length)
+            resourceLengths[index] = length
+            resourceAnchors[index] = anchors
+        }
+        val resourceStarts = LongArray(spine.size)
+        for (index in 1 until spine.size) {
+            resourceStarts[index] = resourceStarts[index - 1] + resourceLengths[index - 1]
+        }
+        val starts = chapters.map { chapter ->
+            val resourceIndex = resourceIndexes[normalizeHref(chapter.url)] ?: return null
+            val fragmentFraction = chapter.startFragmentId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { resourceAnchors[resourceIndex]?.get(it) }
+                ?: 0.0
+            resourceStarts[resourceIndex] +
+                (resourceLengths[resourceIndex] * fragmentFraction).toLong()
+        }
+        if (starts.zipWithNext().any { (left, right) -> right < left }) return null
+        val totalLength = resourceStarts[resourceStarts.lastIndex] +
+            resourceLengths[resourceLengths.lastIndex]
+        val lengths = starts.mapIndexed { index, start ->
+            val end = starts.getOrNull(index + 1) ?: totalLength
+            (end - start).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+        }
+        if (lengths.sumOf { it.toLong() } == 0L) return null
+        chapterLengthsCacheKey = cacheKey
+        chapterLengthsCache = lengths
+        return lengths
+    }
+
+    private fun getChapterProgressToken(
+        chapter: BookChapter,
+        chapterPosition: Int,
+    ): String? {
+        val spine = epubBook?.spine?.spineReferences ?: return null
+        val href = normalizeHref(chapter.url)
+        val fragmentOrdinal = spine.indexOfFirst {
+            normalizeHref(it.resource.href) == href
+        }.takeIf { it >= 0 }?.plus(1) ?: return null
+        val anchorId = chapter.startFragmentId
+            ?.takeIf { it.isNotBlank() }
+            ?: chapter.url.substringAfter('#', "").takeIf { it.isNotBlank() }
+        val body = Jsoup.parse(
+            String(spine[fragmentOrdinal - 1].resource.data, mCharset)
+        ).body()
+        val anchor = anchorId?.let { id ->
+            body.getElementById(id)
+                ?: runCatching {
+                    body.getElementById(URLDecoder.decode(id, "UTF-8"))
+                }.getOrNull()
+                ?: findChapterTitleAnchor(body, chapter.title)
+        }
+        if (anchorId != null && anchor == null) return null
+        if (anchor == null && !hasSingleChapterForResource(href)) {
+            return "/body/DocFragment[$fragmentOrdinal]"
+        }
+        val anchorOffset = anchor?.let { element ->
+            firstTextNode(element)?.let { textStart(body, it) }
+        } ?: 0
+        val targetOffset = anchorOffset + chapterPosition.coerceAtLeast(0)
+        findTextNodeAt(body, targetOffset)?.let { (textNode, characterOffset) ->
+            val parent = textNode.parent() ?: return@let
+            val nodePath = elementPath(body, parent) ?: return@let
+            return KoReaderProgressMapper.formatEpubTextXPointer(
+                fragmentOrdinal = fragmentOrdinal,
+                nodePath = "$nodePath/text()",
+                characterOffset = characterOffset,
+            )
+        }
+        if (anchor == null) return "/body/DocFragment[$fragmentOrdinal]"
+        val nodePath = elementPath(body, anchor) ?: return null
+        return KoReaderProgressMapper.formatEpubElementXPointer(fragmentOrdinal, nodePath)
+    }
+
+    private fun hasSingleChapterForResource(href: String): Boolean {
+        if (readingBoundaries == null) getChapterList()
+        return readingBoundaries?.values?.count { normalizeHref(it.url) == href } == 1
+    }
+
+    private fun findTextNodeAt(body: Element, targetOffset: Int): Pair<TextNode, Int>? {
+        var offset = 0
+        var result: Pair<TextNode, Int>? = null
+        fun visit(node: Node) {
+            if (result != null) return
+            if (node is TextNode) {
+                val textLength = node.text().length
+                if (textLength > 0 && targetOffset <= offset + textLength) {
+                    result = node to (targetOffset - offset).coerceIn(0, textLength)
+                } else {
+                    offset += textLength
+                }
+            } else {
+                node.childNodes().forEach(::visit)
+            }
+        }
+        visit(body)
+        return result
+    }
+
+    private fun elementPath(body: Element, target: Element): String? {
+        val segments = mutableListOf<String>()
+        var current: Element = target
+        while (current !== body) {
+            val parent = current.parent() ?: return null
+            val tagName = current.tagName()
+            val index = parent.children()
+                .filter { it.tagName().equals(tagName, true) }
+                .indexOfFirst { it === current }
+                .takeIf { it >= 0 }?.plus(1) ?: return null
+            segments.add(0, "$tagName[$index]")
+            current = parent
+        }
+        if (segments.isEmpty()) return null
+        return "body/${segments.joinToString("/")}"
+    }
+
+    private fun findChapterTitleAnchor(body: Element, title: String): Element? {
+        val expected = normalizeChapterTitle(title)
+        if (expected.length < 2) return null
+        return body.getAllElements().asSequence()
+            .filter { it !== body }
+            .mapNotNull { element ->
+                val text = normalizeChapterTitle(element.text())
+                element.takeIf { text.isNotEmpty() && text.contains(expected) }
+            }
+            .minByOrNull { normalizeChapterTitle(it.text()).length }
+    }
+
+    private fun normalizeChapterTitle(value: String): String =
+        value.filterNot { it.isWhitespace() || it == '\u00A0' }
+
+    private fun textLength(node: Node): Int = when (node) {
+        is TextNode -> node.text().length
+        is Element -> node.childNodes().sumOf(::textLength)
+        else -> node.childNodes().sumOf(::textLength)
+    }
+
+    private fun collectAnchors(
+        node: Node,
+        start: Int,
+        anchors: MutableMap<String, Double>,
+        totalLength: Int,
+    ): Int {
+        var offset = start
+        if (node is Element && node.id().isNotBlank()) {
+            anchors.putIfAbsent(node.id(), (offset.toDouble() / totalLength).coerceIn(0.0, 1.0))
+        }
+        when (node) {
+            is TextNode -> offset += node.text().length
+            else -> node.childNodes().forEach { child ->
+                offset = collectAnchors(child, offset, anchors, totalLength)
+            }
+        }
+        return offset
+    }
+
+    private fun findTextTarget(body: Element, nodePath: String): Pair<Int, TextNode>? {
+        var current: Node = body
+        val segments = nodePath.split('/').filter { it.isNotBlank() }
+        for ((segmentIndex, segment) in segments.withIndex()) {
+            if (segment == "body" && current === body) continue
+            val element = current as? Element ?: return null
+            val textSegment = TEXT_SEGMENT.matchEntire(segment)
+            if (textSegment != null) {
+                val textIndex = (textSegment.groupValues[1].toIntOrNull()?.minus(1) ?: 0)
+                    .coerceAtLeast(0)
+                val textNodes = element.childNodes().filterIsInstance<TextNode>()
+                when {
+                    textNodes.isNotEmpty() -> {
+                        current = textNodes.getOrNull(textIndex) ?: return null
+                    }
+
+                    segmentIndex < segments.lastIndex -> return null
+                    else -> {
+                        val firstText = firstTextNode(element) ?: return null
+                        return textStart(body, firstText)?.let { it to firstText }
+                    }
+                }
+                continue
+            }
+            val elementSegment = ELEMENT_SEGMENT.matchEntire(segment) ?: return null
+            val tagName = elementSegment.groupValues[1]
+            val elementIndex = (elementSegment.groupValues[2].toIntOrNull()?.minus(1) ?: 0)
+                .coerceAtLeast(0)
+            current = element.children().filter { it.tagName().equals(tagName, true) }
+                .getOrNull(elementIndex) ?: return null
+        }
+        return when (val target = current) {
+            is TextNode -> textStart(body, target)?.let { it to target }
+            is Element -> firstTextNode(target)?.let { textStart(body, it)?.let { start -> start to it } }
+            else -> null
+        }
+    }
+
+    private fun firstTextNode(element: Element): TextNode? {
+        element.childNodes().forEach { child ->
+            when (child) {
+                is TextNode -> if (child.text().isNotEmpty()) return child
+                is Element -> firstTextNode(child)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun textStart(root: Node, target: TextNode): Int? {
+        var offset = 0
+        var found = false
+        fun visit(node: Node) {
+            if (found) return
+            if (node === target) {
+                found = true
+                return
+            }
+            if (node is TextNode) {
+                offset += node.text().length
+            } else {
+                node.childNodes().forEach(::visit)
+            }
+        }
+        visit(root)
+        return offset.takeIf { found }
     }
 
     private fun repairCachedContent(chapter: BookChapter, content: String): String {
@@ -476,6 +766,8 @@ class EpubFile(var book: Book) : AutoCloseable {
 
     override fun close() {
         readingBoundaries = null
+        chapterLengthsCacheKey = null
+        chapterLengthsCache = null
         checkedContentCaches.clear()
         epubBookContents = null
         epubBook = null
@@ -510,5 +802,11 @@ class EpubFile(var book: Book) : AutoCloseable {
             }
         }
     }
+
+    private fun normalizeHref(href: String?): String =
+        href.orEmpty().trimStart('/').substringBefore('#')
+
+    private val TEXT_SEGMENT = Regex("""text\((?:\[(\d+)])?\)""")
+    private val ELEMENT_SEGMENT = Regex("""([A-Za-z][\w:.-]*)(?:\[(\d+)])?""")
 
 }

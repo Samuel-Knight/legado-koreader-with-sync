@@ -38,6 +38,25 @@
 		<item>@string/read_progress_enhanced</item>
 	</string-array>
 
+    <string-array name="koreader_matching_title">
+        <item>@string/koreader_matching_binary</item>
+        <item>@string/koreader_matching_filename</item>
+    </string-array>
+    <string-array name="koreader_matching_value">
+        <item>binary</item>
+        <item>filename</item>
+    </string-array>
+    <string-array name="koreader_sync_strategy_title">
+        <item>@string/koreader_sync_strategy_silent</item>
+        <item>@string/koreader_sync_strategy_prompt</item>
+        <item>@string/koreader_sync_strategy_disable</item>
+    </string-array>
+    <string-array name="koreader_sync_strategy_value">
+        <item>silent</item>
+        <item>prompt</item>
+        <item>disable</item>
+    </string-array>
+
 	<string-array name="book_sort">
 		<item>@string/text_default</item>
 		<item>@string/bookshelf_px_0</item>
