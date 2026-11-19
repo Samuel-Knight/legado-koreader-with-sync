@@ -20,6 +20,15 @@ Legado 是一款免费的 Android 平台开源小说阅读器。
 
 详细使用方法见 [KOREADER_SYNC_README.md](KOREADER_SYNC_README.md)。
 
+## 功能页面
+
+<p align="center">
+  <img src="docs/images/koreader-sync-account-settings.jpg" width="360" alt="KOReader 账号与服务器设置">
+  <img src="docs/images/koreader-sync-reading-menu.jpg" width="360" alt="阅读页 KOReader 同步菜单">
+</p>
+
+<p align="center"><sub>KOReader 账号与服务器</sub>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<sub>阅读页同步菜单</sub></p>
+
 ## 相对原版的改动
 
 | 方面 | 原版 Legado | 本仓库 |
